@@ -18,108 +18,243 @@ HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f9;
+      --bg: #f3f5f8;
       --panel: #ffffff;
-      --line: #dfe3ea;
-      --text: #1f2937;
+      --panel-soft: #f8fafc;
+      --line: #d8dee8;
+      --text: #152033;
       --muted: #667085;
       --accent: #2563eb;
       --accent-dark: #1d4ed8;
-      --tool: #eef6f2;
+      --green: #0f766e;
+      --orange: #b45309;
+      --tool: #eef8f5;
+      --shadow: 0 18px 45px rgba(21, 32, 51, .08);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: var(--bg);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(180deg, #f9fbff 0%, var(--bg) 42%, #eef2f7 100%);
       color: var(--text);
     }
     .layout {
       display: grid;
-      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-columns: 260px minmax(0, 1fr);
       min-height: 100vh;
     }
     aside {
       border-right: 1px solid var(--line);
-      background: #fbfcfe;
-      padding: 20px;
+      background: rgba(255, 255, 255, .78);
+      backdrop-filter: blur(12px);
+      padding: 22px;
     }
     aside h1 {
-      font-size: 18px;
-      margin: 0 0 18px;
+      font-size: 20px;
+      margin: 0 0 6px;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      margin-bottom: 22px;
     }
     aside h2 {
       font-size: 13px;
-      margin: 24px 0 10px;
+      margin: 22px 0 10px;
       color: var(--muted);
     }
     .tool {
-      padding: 8px 10px;
+      padding: 9px 11px;
       margin-bottom: 8px;
       border: 1px solid var(--line);
       border-radius: 6px;
       background: var(--tool);
       font-size: 13px;
     }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 11px;
+      border: 1px solid #c7d2fe;
+      border-radius: 8px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 13px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+    }
     main {
       display: flex;
       flex-direction: column;
       height: 100vh;
     }
+    header {
+      padding: 18px 28px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .86);
+      backdrop-filter: blur(12px);
+    }
+    header h2 {
+      margin: 0;
+      font-size: 19px;
+    }
+    header p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
     .chat {
       flex: 1;
       overflow-y: auto;
-      padding: 24px;
+      padding: 26px 28px;
     }
-    .message {
+    .turn {
       max-width: 860px;
-      padding: 14px 16px;
+      margin: 0 auto 16px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+    .turn.user-turn {
+      flex-direction: row-reverse;
+    }
+    .avatar {
+      flex: 0 0 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 13px;
+      background: var(--green);
+      box-shadow: var(--shadow);
+    }
+    .user-turn .avatar {
+      background: var(--accent);
+    }
+    .bubble {
+      min-width: 0;
+      max-width: min(720px, 100%);
+      padding: 13px 15px 14px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel);
-      margin: 0 auto 14px;
       line-height: 1.65;
       white-space: pre-wrap;
+      box-shadow: 0 8px 24px rgba(21, 32, 51, .05);
     }
-    .user {
+    .user-turn .bubble {
       border-color: #bfdbfe;
       background: #eff6ff;
     }
-    details {
+    .speaker {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .thinking-panel {
       max-width: 860px;
       margin: 0 auto 14px;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel);
-      padding: 10px 14px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
     }
-    summary {
-      cursor: pointer;
-      color: var(--muted);
+    .thinking-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+      color: var(--text);
+      font-weight: 700;
       font-size: 14px;
     }
-    pre {
-      overflow-x: auto;
-      background: #111827;
-      color: #f9fafb;
-      padding: 12px;
-      border-radius: 6px;
+    .thinking-state {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 12px;
+    }
+    .steps {
+      padding: 12px 14px 14px;
+    }
+    .step {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid #edf0f5;
+      animation: fadeIn .26s ease-out both;
+    }
+    .step:last-child {
+      border-bottom: 0;
+    }
+    .step-index {
+      width: 26px;
+      height: 26px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .step-title {
+      margin-bottom: 4px;
+      font-weight: 700;
       font-size: 13px;
+    }
+    .step-text {
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .tool-call {
+      margin-top: 8px;
+      padding: 9px 10px;
+      border-left: 3px solid var(--orange);
+      border-radius: 6px;
+      background: #fff7ed;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
     form {
       display: flex;
       gap: 10px;
-      padding: 16px 24px 22px;
+      padding: 16px 28px 22px;
       border-top: 1px solid var(--line);
-      background: #fff;
+      background: rgba(255, 255, 255, .9);
     }
     input {
       flex: 1;
       min-width: 0;
-      padding: 12px 14px;
+      padding: 13px 14px;
       border: 1px solid var(--line);
       border-radius: 6px;
       font-size: 15px;
+      outline: none;
+      background: #fff;
+    }
+    input:focus {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 3px rgba(147, 197, 253, .28);
     }
     button {
       width: 96px;
@@ -130,15 +265,44 @@ HTML = r"""<!doctype html>
       font-size: 15px;
       cursor: pointer;
     }
+    button:hover {
+      background: var(--accent-dark);
+    }
     button:disabled {
       opacity: .55;
       cursor: wait;
+    }
+    .loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+    }
+    .pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1s infinite ease-in-out;
+    }
+    @keyframes pulse {
+      0%, 100% { transform: scale(.82); opacity: .45; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+    @keyframes fadeIn {
+      from { transform: translateY(4px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
     }
     @media (max-width: 760px) {
       .layout { grid-template-columns: 1fr; }
       aside { display: none; }
       main { height: 100vh; }
       form { padding: 12px; }
+      header { padding: 14px 16px; }
+      .chat { padding: 16px 12px; }
+      .turn, .thinking-panel { max-width: 100%; }
+      .avatar { display: none; }
+      .bubble { max-width: 100%; }
     }
   </style>
 </head>
@@ -146,6 +310,8 @@ HTML = r"""<!doctype html>
   <div class="layout">
     <aside>
       <h1>Mini ReAct Agent</h1>
+      <div class="subtitle">一个从零实现的 ReAct 工具调用智能体。</div>
+      <div class="status"><span class="dot"></span><span>本地 Web 服务运行中</span></div>
       <h2>工具</h2>
       <div class="tool">calculator</div>
       <div class="tool">wikipedia_search</div>
@@ -155,8 +321,17 @@ HTML = r"""<!doctype html>
       <div class="tool">查一下爱因斯坦的出生年份和去世年份，然后计算他活了多少岁。</div>
     </aside>
     <main>
+      <header>
+        <h2>Agent 对话台</h2>
+        <p>用户提问后，AI 会按步骤思考、选择工具、观察结果并整理答案。</p>
+      </header>
       <section id="chat" class="chat">
-        <div class="message">你好，我是 Mini ReAct Agent。输入任务后，我会自动选择工具并展示调用过程。</div>
+        <div class="turn ai-turn">
+          <div class="avatar">AI</div>
+          <div class="bubble">
+            <span class="speaker">AI 回答</span>你好，我是 Mini ReAct Agent。输入任务后，我会自动选择工具并展示调用过程。
+          </div>
+        </div>
       </section>
       <form id="form">
         <input id="input" autocomplete="off" placeholder="输入你的任务">
@@ -170,26 +345,111 @@ HTML = r"""<!doctype html>
     const input = document.querySelector("#input");
     const send = document.querySelector("#send");
 
-    function addMessage(text, cls) {
+    function addMessage(text, role) {
       const el = document.createElement("div");
-      el.className = "message " + (cls || "");
-      el.textContent = text;
+      const isUser = role === "user";
+      el.className = "turn " + (isUser ? "user-turn" : "ai-turn");
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = isUser ? "你" : "AI";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const speaker = document.createElement("span");
+      speaker.className = "speaker";
+      speaker.textContent = isUser ? "用户提问" : "AI 回答";
+      const content = document.createElement("span");
+      content.textContent = text;
+      bubble.appendChild(speaker);
+      bubble.appendChild(content);
+      el.appendChild(avatar);
+      el.appendChild(bubble);
       chat.appendChild(el);
       chat.scrollTop = chat.scrollHeight;
-      return el;
+      return content;
     }
 
-    function addSteps(steps) {
-      const details = document.createElement("details");
-      details.open = true;
-      const summary = document.createElement("summary");
-      summary.textContent = "查看思考与工具调用";
-      const pre = document.createElement("pre");
-      pre.textContent = JSON.stringify(steps, null, 2);
-      details.appendChild(summary);
-      details.appendChild(pre);
-      chat.appendChild(details);
+    function createThinkingPanel() {
+      const panel = document.createElement("section");
+      panel.className = "thinking-panel";
+      const head = document.createElement("div");
+      head.className = "thinking-head";
+      const title = document.createElement("span");
+      title.textContent = "AI 思考过程";
+      const state = document.createElement("span");
+      state.className = "thinking-state";
+      state.textContent = "等待模型返回";
+      const steps = document.createElement("div");
+      steps.className = "steps";
+      head.appendChild(title);
+      head.appendChild(state);
+      panel.appendChild(head);
+      panel.appendChild(steps);
+      chat.appendChild(panel);
       chat.scrollTop = chat.scrollHeight;
+      return { panel, state, steps };
+    }
+
+    function renderStep(container, step) {
+      const item = document.createElement("div");
+      item.className = "step";
+      const index = document.createElement("div");
+      index.className = "step-index";
+      index.textContent = step.index;
+      const body = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "step-title";
+      title.textContent = step.final_answer ? "最终回答" : (step.action ? "思考并调用工具" : "思考");
+      const thought = document.createElement("div");
+      thought.className = "step-text";
+      thought.textContent = "思考：" + (step.thought || "无");
+      body.appendChild(title);
+      body.appendChild(thought);
+
+      if (step.action) {
+        const tool = document.createElement("div");
+        tool.className = "tool-call";
+        tool.textContent = [
+          "工具：" + step.action,
+          "参数：" + JSON.stringify(step.action_input || {}, null, 2),
+          "观察：" + (step.observation || "")
+        ].join("\n");
+        body.appendChild(tool);
+      }
+      if (step.final_answer) {
+        const finalText = document.createElement("div");
+        finalText.className = "tool-call";
+        finalText.textContent = "答案：" + step.final_answer;
+        body.appendChild(finalText);
+      }
+
+      item.appendChild(index);
+      item.appendChild(body);
+      container.appendChild(item);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    async function animateSteps(panel, steps) {
+      if (!steps || !steps.length) {
+        panel.state.textContent = "没有工具调用步骤";
+        return;
+      }
+      panel.state.textContent = "逐步展示中";
+      for (const step of steps) {
+        renderStep(panel.steps, step);
+        await new Promise(resolve => setTimeout(resolve, 420));
+      }
+      panel.state.textContent = "完成";
+    }
+
+    function startThinkingStatus(panel) {
+      const states = ["整理上下文", "等待模型决策", "解析工具调用", "准备观察结果"];
+      let index = 0;
+      panel.state.textContent = states[index];
+      const timer = setInterval(() => {
+        index = (index + 1) % states.length;
+        panel.state.textContent = states[index];
+      }, 900);
+      return () => clearInterval(timer);
     }
 
     form.addEventListener("submit", async (event) => {
@@ -199,7 +459,14 @@ HTML = r"""<!doctype html>
       input.value = "";
       send.disabled = true;
       addMessage(text, "user");
-      const waiting = addMessage("Agent 正在思考和调用工具...");
+      const panel = createThinkingPanel();
+      const stopStatus = startThinkingStatus(panel);
+      const waiting = addMessage("Agent 正在思考和调用工具...", "ai");
+      waiting.innerHTML = "";
+      const loading = document.createElement("span");
+      loading.className = "loading";
+      loading.innerHTML = "<span class='pulse'></span><span>Agent 正在思考和调用工具...</span>";
+      waiting.appendChild(loading);
 
       try {
         const response = await fetch("/api/chat", {
@@ -208,10 +475,13 @@ HTML = r"""<!doctype html>
           body: JSON.stringify({message: text})
         });
         const data = await response.json();
+        stopStatus();
         waiting.textContent = data.final_answer || data.error || "没有返回内容。";
-        if (data.steps) addSteps(data.steps);
+        await animateSteps(panel, data.steps);
       } catch (error) {
+        stopStatus();
         waiting.textContent = "请求失败：" + error;
+        panel.state.textContent = "请求失败";
       } finally {
         send.disabled = false;
         input.focus();
