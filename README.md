@@ -65,6 +65,20 @@ python main.py
 
 ## Web 界面运行
 
+零依赖版本：
+
+```bash
+python web_app.py
+```
+
+然后打开：
+
+```text
+http://localhost:8501
+```
+
+Streamlit 版本：
+
 ```bash
 streamlit run app.py
 ```

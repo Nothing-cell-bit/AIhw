@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from config import get_settings
-from llm_client import LLMClient
+from llm_client import LLMClient, LLMEmptyResponseError
 from memory import ConversationMemory
 from tools import run_tool
 
@@ -38,7 +38,21 @@ class MiniReActAgent:
         steps: List[AgentStep] = []
 
         for step_index in range(1, self.max_steps + 1):
-            raw_output = self.llm.chat(self.memory.get_messages())
+            try:
+                raw_output = self.llm.chat(self.memory.get_messages())
+            except LLMEmptyResponseError:
+                final_answer = (
+                    "模型接口这次返回了空内容，通常是服务端临时失败或安全过滤导致的。"
+                    "请换一种更明确的说法重试，例如说明是在游戏、学习或软件使用场景中提问。"
+                )
+                steps.append(
+                    AgentStep(
+                        index=step_index,
+                        thought="LLM API 返回空 choices",
+                        final_answer=final_answer,
+                    )
+                )
+                return AgentResult(final_answer=final_answer, steps=steps)
             self.memory.add_assistant(raw_output)
             parsed = self._parse_json(raw_output)
 
