@@ -1,4 +1,5 @@
 import json
+import time
 from typing import Any, Dict, List
 from urllib import error, request
 
@@ -20,21 +21,38 @@ class LLMClient:
         if stream:
             raise NotImplementedError("标准库版本暂不支持流式输出。")
 
-        payload = {
+        base_payload = {
             "model": self.model,
             "messages": messages,
             "temperature": 0.2,
             "max_tokens": 1200,
         }
-        data = self._post_json("/chat/completions", payload)
-        try:
-            return self._extract_content(data)
-        except LLMEmptyResponseError:
-            retry_payload = dict(payload)
-            retry_payload["messages"] = self._build_retry_messages(messages)
-            retry_payload["temperature"] = 0.1
-            retry_data = self._post_json("/chat/completions", retry_payload)
-            return self._extract_content(retry_data)
+
+        attempts = [
+            base_payload,
+            {
+                **base_payload,
+                "messages": self._build_retry_messages(messages),
+                "temperature": 0.1,
+            },
+            {
+                **base_payload,
+                "messages": self._build_minimal_retry_messages(messages),
+                "temperature": 0.1,
+            },
+        ]
+
+        last_error = None
+        for index, payload in enumerate(attempts):
+            try:
+                data = self._post_json("/chat/completions", payload)
+                return self._extract_content(data)
+            except LLMEmptyResponseError as exc:
+                last_error = exc
+                if index < len(attempts) - 1:
+                    time.sleep(0.6)
+
+        raise last_error or LLMEmptyResponseError("LLM API 连续返回空内容。")
 
     def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -95,21 +113,46 @@ class LLMClient:
 
     @staticmethod
     def _build_retry_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        system = messages[0] if messages and messages[0].get("role") == "system" else None
-        recent = messages[-6:]
-        retry_note = {
-            "role": "system",
-            "content": (
-                "上一次接口返回了空内容。请重新回答。"
-                "如果用户问题依赖前文，请结合最近上下文理解。"
-                "如果问题属于游戏、学习或软件使用场景，请按该安全场景回答。"
-                "必须只返回一个 JSON 对象，不要输出 Markdown。"
-            ),
-        }
-
-        rebuilt = []
-        if system:
-            rebuilt.append(system)
-        rebuilt.append(retry_note)
+        system_content = messages[0].get("content", "") if messages and messages[0].get("role") == "system" else ""
+        recent = [message for message in messages[-8:] if message.get("role") != "system"]
+        rebuilt = [
+            {
+                "role": "system",
+                "content": (
+                    system_content
+                    + "\n\n补充要求：上一次接口返回了空内容。请重新回答。"
+                    "如果用户问题依赖前文，请结合最近上下文理解。"
+                    "如果问题属于游戏、学习或软件使用场景，请按该安全场景回答。"
+                    "必须只返回一个 JSON 对象，不要输出 Markdown。"
+                ),
+            }
+        ]
         rebuilt.extend(recent)
         return rebuilt
+
+    @staticmethod
+    def _build_minimal_retry_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        last_user = ""
+        last_observation = ""
+        for message in reversed(messages):
+            content = message.get("content", "")
+            if not last_observation and "工具观察结果 observation:" in content:
+                last_observation = content
+            if not last_user and message.get("role") == "user" and "工具观察结果 observation:" not in content:
+                last_user = content
+            if last_user and last_observation:
+                break
+
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "你是一个稳健的 AI Agent。请根据用户问题和工具观察结果给出最终回答。"
+                    "必须只返回 JSON：{\"thought\":\"...\",\"final_answer\":\"...\"}。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"用户问题：{last_user}\n\n{last_observation}",
+            },
+        ]

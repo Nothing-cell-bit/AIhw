@@ -389,6 +389,30 @@ HTML = r"""<!doctype html>
       return { panel, state, steps };
     }
 
+    function formatActionInput(step) {
+      const input = step.action_input || {};
+      if (step.action === "calculator") {
+        return input.expression ? "计算表达式：" + input.expression : "";
+      }
+      if (step.action === "wikipedia_search") {
+        const lang = input.lang ? "，语言：" + input.lang : "";
+        return input.query ? "搜索关键词：" + input.query + lang : "";
+      }
+      if (step.action === "file_write") {
+        return input.filename ? "写入文件：" + input.filename : "";
+      }
+      if (step.action === "file_read") {
+        return input.filename ? "读取文件：" + input.filename : "";
+      }
+      return "";
+    }
+
+    function formatObservation(step) {
+      if (!step.observation) return "";
+      const text = String(step.observation);
+      return text.length > 600 ? text.slice(0, 600) + "..." : text;
+    }
+
     function renderStep(container, step) {
       const item = document.createElement("div");
       item.className = "step";
@@ -398,21 +422,23 @@ HTML = r"""<!doctype html>
       const body = document.createElement("div");
       const title = document.createElement("div");
       title.className = "step-title";
-      title.textContent = step.final_answer ? "最终回答" : (step.action ? "思考并调用工具" : "思考");
+      title.textContent = step.final_answer ? "形成最终回答" : (step.action ? "调用工具" : "继续调整");
       const thought = document.createElement("div");
       thought.className = "step-text";
-      thought.textContent = "思考：" + (step.thought || "无");
+      thought.textContent = step.summary || ("思考：" + (step.thought || "无"));
       body.appendChild(title);
       body.appendChild(thought);
 
       if (step.action) {
         const tool = document.createElement("div");
         tool.className = "tool-call";
+        const inputText = formatActionInput(step);
+        const observation = formatObservation(step);
         tool.textContent = [
-          "工具：" + step.action,
-          "参数：" + JSON.stringify(step.action_input || {}, null, 2),
-          "观察：" + (step.observation || "")
-        ].join("\n");
+          "使用工具：" + readableToolName(step.action),
+          inputText ? "调用内容：" + inputText : "",
+          observation ? "工具结果：" + observation : ""
+        ].filter(Boolean).join("\n");
         body.appendChild(tool);
       }
       if (step.final_answer) {
@@ -428,17 +454,14 @@ HTML = r"""<!doctype html>
       chat.scrollTop = chat.scrollHeight;
     }
 
-    async function animateSteps(panel, steps) {
-      if (!steps || !steps.length) {
-        panel.state.textContent = "没有工具调用步骤";
-        return;
-      }
-      panel.state.textContent = "逐步展示中";
-      for (const step of steps) {
-        renderStep(panel.steps, step);
-        await new Promise(resolve => setTimeout(resolve, 420));
-      }
-      panel.state.textContent = "完成";
+    function readableToolName(name) {
+      const names = {
+        calculator: "计算器",
+        wikipedia_search: "维基百科搜索",
+        file_write: "本地文件写入",
+        file_read: "本地文件读取"
+      };
+      return names[name] || name || "未知工具";
     }
 
     function startThinkingStatus(panel) {
@@ -469,15 +492,57 @@ HTML = r"""<!doctype html>
       waiting.appendChild(loading);
 
       try {
-        const response = await fetch("/api/chat", {
+        const response = await fetch("/api/chat_stream", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({message: text})
         });
-        const data = await response.json();
+        if (!response.ok || !response.body) {
+          const data = await response.json();
+          stopStatus();
+          waiting.textContent = data.error || "请求失败。";
+          panel.state.textContent = "请求失败";
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let finalAnswer = "";
+        let gotStep = false;
+        let streamDone = false;
+
+        while (!streamDone) {
+          const chunk = await reader.read();
+          streamDone = chunk.done;
+          buffer += decoder.decode(chunk.value || new Uint8Array(), {stream: !streamDone});
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const event = JSON.parse(line);
+            if (event.type === "status") {
+              panel.state.textContent = event.message;
+            } else if (event.type === "step") {
+              gotStep = true;
+              stopStatus();
+              panel.state.textContent = "正在展示真实步骤";
+              renderStep(panel.steps, event.step);
+            } else if (event.type === "done") {
+              stopStatus();
+              finalAnswer = event.final_answer || "";
+              panel.state.textContent = gotStep ? "完成" : "没有工具调用步骤";
+            } else if (event.type === "error") {
+              stopStatus();
+              waiting.textContent = event.error || "请求失败。";
+              panel.state.textContent = "请求失败";
+              return;
+            }
+          }
+        }
         stopStatus();
-        waiting.textContent = data.final_answer || data.error || "没有返回内容。";
-        await animateSteps(panel, data.steps);
+        waiting.textContent = finalAnswer || "没有返回内容。";
       } catch (error) {
         stopStatus();
         waiting.textContent = "请求失败：" + error;
@@ -501,6 +566,10 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
+        if self.path == "/api/chat_stream":
+            self._handle_chat_stream()
+            return
+
         if self.path != "/api/chat":
             self._send_json(404, {"error": "Not found"})
             return
@@ -535,6 +604,38 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._send_json(500, {"error": str(exc)})
 
+    def _handle_chat_stream(self):
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length).decode("utf-8")
+            payload = json.loads(body or "{}")
+            message = str(payload.get("message", "")).strip()
+            if not message:
+                self._send_json(400, {"error": "message 不能为空"})
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Accel-Buffering", "no")
+            self.end_headers()
+
+            for event in AGENT.run_events(message):
+                if event["type"] == "done":
+                    result = event["result"]
+                    payload = {
+                        "type": "done",
+                        "final_answer": result.final_answer,
+                    }
+                else:
+                    payload = event
+                self._write_stream_event(payload)
+        except Exception as exc:
+            try:
+                self._write_stream_event({"type": "error", "error": str(exc)})
+            except Exception:
+                pass
+
     def log_message(self, format, *args):
         return
 
@@ -549,6 +650,11 @@ class Handler(BaseHTTPRequestHandler):
     def _send_json(self, status, payload):
         text = json.dumps(payload, ensure_ascii=False)
         self._send_text(status, text, "application/json; charset=utf-8")
+
+    def _write_stream_event(self, payload):
+        line = json.dumps(payload, ensure_ascii=False) + "\n"
+        self.wfile.write(line.encode("utf-8"))
+        self.wfile.flush()
 
 
 def main():
