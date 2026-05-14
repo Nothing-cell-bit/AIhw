@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 
 EMPTY = 0
@@ -30,10 +30,10 @@ class Move:
     row: int
     col: int
     timestamp: float = field(default_factory=time.time)
-    elapsed_ms: int | None = None
-    depth_reached: int | None = None
-    nodes: int | None = None
-    score: int | None = None
+    elapsed_ms: Optional[int] = None
+    depth_reached: Optional[int] = None
+    nodes: Optional[int] = None
+    score: Optional[int] = None
 
 
 @dataclass
@@ -79,7 +79,7 @@ def store_game(state: GameState) -> GameState:
     return state
 
 
-def get_game(game_id: str | None = None) -> GameState:
+def get_game(game_id: Optional[str] = None) -> GameState:
     if game_id:
         state = GAMES.get(game_id)
         if state is None:
@@ -111,10 +111,10 @@ def apply_move(
     col: int,
     player: int,
     *,
-    elapsed_ms: int | None = None,
-    depth_reached: int | None = None,
-    nodes: int | None = None,
-    score: int | None = None,
+    elapsed_ms: Optional[int] = None,
+    depth_reached: Optional[int] = None,
+    nodes: Optional[int] = None,
+    score: Optional[int] = None,
 ) -> GameState:
     row = int(row)
     col = int(col)

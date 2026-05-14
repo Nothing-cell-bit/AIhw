@@ -1,6 +1,6 @@
 import json
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Union
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Union
 from urllib import error, request
 
 from config import get_settings
@@ -11,7 +11,12 @@ class LLMEmptyResponseError(RuntimeError):
 
 
 class LLMClient:
-    def __init__(self, api_key: str | None = None, base_url: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> None:
         settings = get_settings()
         self.model = model or settings.model
         self.api_key = api_key if api_key is not None else settings.api_key

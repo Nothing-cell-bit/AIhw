@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional, Tuple, Union
 
 from game import (
     AI,
@@ -24,7 +24,7 @@ from game import (
 from game_ai import choose_ai_move, evaluate_board
 
 
-def game_create(game: str = "gomoku", size: int = 9, human: str | int = "B", ai: str | int = "W") -> str:
+def game_create(game: str = "gomoku", size: int = 9, human: Union[str, int] = "B", ai: Union[str, int] = "W") -> str:
     if game != "gomoku":
         raise GameError("首版只支持 gomoku 五子棋。")
     human_player = _piece_to_int(human, HUMAN)
@@ -35,7 +35,7 @@ def game_create(game: str = "gomoku", size: int = 9, human: str | int = "B", ai:
     return _json(payload)
 
 
-def game_player_move(game_id: str | None = None, row: int = 0, col: int = 0) -> str:
+def game_player_move(game_id: Optional[str] = None, row: int = 0, col: int = 0) -> str:
     state = get_game(game_id)
     if state.turn != state.human:
         raise GameError("当前不是玩家回合。")
@@ -49,7 +49,7 @@ def game_player_move(game_id: str | None = None, row: int = 0, col: int = 0) -> 
     return _json(payload)
 
 
-def game_ai_move(game_id: str | None = None, time_limit_ms: int = 5000, max_depth: int = 5) -> str:
+def game_ai_move(game_id: Optional[str] = None, time_limit_ms: int = 5000, max_depth: int = 5) -> str:
     state = get_game(game_id)
     if state.status != STATUS_PLAYING:
         raise GameError("棋局已经结束。")
@@ -108,7 +108,7 @@ def game_ai_move(game_id: str | None = None, time_limit_ms: int = 5000, max_dept
     return _json(payload)
 
 
-def game_analyze(game_id: str | None = None) -> str:
+def game_analyze(game_id: Optional[str] = None) -> str:
     state = get_game(game_id)
     ai_moves = [move for move in state.moves if move.player == state.ai]
     human_moves = [move for move in state.moves if move.player == state.human]
@@ -140,7 +140,7 @@ def game_analyze(game_id: str | None = None) -> str:
     return _json(payload)
 
 
-def game_resign(game_id: str | None = None) -> str:
+def game_resign(game_id: Optional[str] = None) -> str:
     state = get_game(game_id)
     resign_game(state)
     payload = serialize_state(state)
@@ -148,7 +148,7 @@ def game_resign(game_id: str | None = None) -> str:
     return _json(payload)
 
 
-def _piece_to_int(piece: str | int, default: int) -> int:
+def _piece_to_int(piece: Union[str, int], default: int) -> int:
     if isinstance(piece, int):
         return piece
     normalized = str(piece).strip().upper()
@@ -217,7 +217,7 @@ def _average(values: list[int]) -> int:
     return int(sum(values) / len(values))
 
 
-def _first_empty(board: list[list[int]]) -> tuple[int, int] | None:
+def _first_empty(board: list[list[int]]) -> Optional[Tuple[int, int]]:
     for row, values in enumerate(board):
         for col, cell in enumerate(values):
             if cell == EMPTY:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import time
 from dataclasses import dataclass
+from typing import Optional, Tuple
 
 from game import AI, EMPTY, HUMAN, DIRECTIONS, board_has_stones, check_winner, clone_board, in_bounds, is_full
 
@@ -110,7 +111,7 @@ def _search_root(
     ai_player: int,
     human_player: int,
     context: SearchContext,
-) -> tuple[tuple[int, int] | None, int]:
+) -> Tuple[Optional[Tuple[int, int]], int]:
     best_move = None
     best_score = -math.inf
     alpha = -math.inf
@@ -244,7 +245,7 @@ def move_priority(
     return max(ai_score, int(human_score * 0.9))
 
 
-def find_winning_move(board: list[list[int]], player: int) -> tuple[int, int] | None:
+def find_winning_move(board: list[list[int]], player: int) -> Optional[Tuple[int, int]]:
     for row, col in candidate_moves_for_player(board, player):
         board[row][col] = player
         winner = check_winner(board, row, col)
