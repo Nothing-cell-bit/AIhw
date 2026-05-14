@@ -1,12 +1,69 @@
 import json
+import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from agent import MiniReActAgent
 
 
 HOST = "127.0.0.1"
 PORT = 8501
-AGENT = MiniReActAgent()
+
+
+def create_conversation(title="新对话"):
+    conversation_id = uuid.uuid4().hex
+    return conversation_id, {
+        "id": conversation_id,
+        "title": title,
+        "created_at": time.time(),
+        "updated_at": time.time(),
+        "agent": MiniReActAgent(),
+        "ui_messages": [],
+    }
+
+
+DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION = create_conversation("新对话")
+CONVERSATIONS = {DEFAULT_CONVERSATION_ID: DEFAULT_CONVERSATION}
+
+
+def get_conversation(conversation_id):
+    if conversation_id in CONVERSATIONS:
+        return CONVERSATIONS[conversation_id]
+    return CONVERSATIONS[DEFAULT_CONVERSATION_ID]
+
+
+def conversation_payload(conversation):
+    return {
+        "id": conversation["id"],
+        "title": conversation["title"],
+        "created_at": conversation["created_at"],
+        "updated_at": conversation["updated_at"],
+        "memory": conversation["agent"].memory.stats(),
+    }
+
+
+def ui_payload(conversation):
+    return {
+        "conversation": conversation_payload(conversation),
+        "messages": conversation["ui_messages"],
+    }
+
+
+def list_conversations():
+    conversations = sorted(
+        CONVERSATIONS.values(),
+        key=lambda item: item["updated_at"],
+        reverse=True,
+    )
+    return [conversation_payload(item) for item in conversations]
+
+
+def title_from_message(message):
+    message = " ".join(message.split())
+    if not message:
+        return "新对话"
+    return message[:18] + ("..." if len(message) > 18 else "")
 
 
 HTML = r"""<!doctype html>
@@ -73,6 +130,43 @@ HTML = r"""<!doctype html>
       background: var(--tool);
       font-size: 13px;
     }
+    .new-chat {
+      width: 100%;
+      height: 38px;
+      margin: 14px 0 8px;
+      border-radius: 7px;
+      background: var(--accent);
+    }
+    .conversation-list {
+      display: grid;
+      gap: 7px;
+      max-height: 260px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+    .conversation-item {
+      width: 100%;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      text-align: left;
+      font-size: 13px;
+      line-height: 1.35;
+      cursor: pointer;
+    }
+    .conversation-item:hover {
+      border-color: #bfdbfe;
+      background: #f8fbff;
+    }
+    .conversation-item.active {
+      border-color: #93c5fd;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-weight: 700;
+    }
     .status {
       display: flex;
       align-items: center;
@@ -83,6 +177,25 @@ HTML = r"""<!doctype html>
       background: #eef2ff;
       color: #3730a3;
       font-size: 13px;
+    }
+    .memory-box {
+      display: grid;
+      gap: 8px;
+      padding: 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .memory-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .memory-row strong {
+      color: var(--text);
+      font-weight: 700;
     }
     .dot {
       width: 8px;
@@ -312,11 +425,20 @@ HTML = r"""<!doctype html>
       <h1>Mini ReAct Agent</h1>
       <div class="subtitle">一个从零实现的 ReAct 工具调用智能体。</div>
       <div class="status"><span class="dot"></span><span>本地 Web 服务运行中</span></div>
+      <button id="new-chat" class="new-chat" type="button">新建对话</button>
+      <h2>对话</h2>
+      <div id="conversation-list" class="conversation-list"></div>
       <h2>工具</h2>
       <div class="tool">calculator</div>
       <div class="tool">wikipedia_search</div>
       <div class="tool">file_write</div>
       <div class="tool">file_read</div>
+      <h2>记忆状态</h2>
+      <div class="memory-box">
+        <div class="memory-row"><span>消息数</span><strong id="memory-count">-</strong></div>
+        <div class="memory-row"><span>上下文字符</span><strong id="memory-chars">-</strong></div>
+        <div class="memory-row"><span>摘要字符</span><strong id="memory-summary">-</strong></div>
+      </div>
       <h2>示例</h2>
       <div class="tool">查一下爱因斯坦的出生年份和去世年份，然后计算他活了多少岁。</div>
     </aside>
@@ -344,6 +466,132 @@ HTML = r"""<!doctype html>
     const form = document.querySelector("#form");
     const input = document.querySelector("#input");
     const send = document.querySelector("#send");
+    const newChat = document.querySelector("#new-chat");
+    const conversationList = document.querySelector("#conversation-list");
+    const memoryCount = document.querySelector("#memory-count");
+    const memoryChars = document.querySelector("#memory-chars");
+    const memorySummary = document.querySelector("#memory-summary");
+    let currentConversationId = null;
+    let isBusy = false;
+    const chatViews = {};
+
+    function setMemoryStats(stats) {
+      if (!stats) {
+        memoryCount.textContent = "-";
+        memoryChars.textContent = "-";
+        memorySummary.textContent = "-";
+        return;
+      }
+      memoryCount.textContent = stats.message_count + "/" + stats.max_messages;
+      memoryChars.textContent = stats.estimated_chars + "/" + stats.max_chars;
+      memorySummary.textContent = stats.summary_chars;
+    }
+
+    async function loadMemoryStats(conversationId) {
+      try {
+        const response = await fetch("/api/memory?conversation_id=" + encodeURIComponent(conversationId));
+        const data = await response.json();
+        setMemoryStats(data);
+      } catch (error) {
+        setMemoryStats(null);
+      }
+    }
+
+    function welcomeHtml() {
+      return `
+        <div class="turn ai-turn">
+          <div class="avatar">AI</div>
+          <div class="bubble">
+            <span class="speaker">AI 回答</span>你好，我是 Mini ReAct Agent。输入任务后，我会自动选择工具并展示调用过程。
+          </div>
+        </div>
+      `;
+    }
+
+    function saveCurrentChat() {
+      if (currentConversationId) {
+        chatViews[currentConversationId] = chat.innerHTML;
+      }
+    }
+
+    function restoreChat(conversationId) {
+      chat.innerHTML = chatViews[conversationId] || welcomeHtml();
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    async function restoreConversationFromServer(conversationId) {
+      const response = await fetch("/api/conversation?conversation_id=" + encodeURIComponent(conversationId));
+      const data = await response.json();
+      if (!data.messages || !data.messages.length) {
+        chatViews[conversationId] = welcomeHtml();
+      } else {
+        chat.innerHTML = "";
+        for (const message of data.messages) {
+          if (message.role === "user") {
+            addMessage(message.content, "user");
+          } else {
+            const panel = createThinkingPanel();
+            panel.state.textContent = "历史步骤";
+            for (const step of message.steps || []) {
+              renderStep(panel.steps, step);
+            }
+            addMessage(message.content, "ai");
+          }
+        }
+        chatViews[conversationId] = chat.innerHTML;
+      }
+      restoreChat(conversationId);
+    }
+
+    async function loadConversations(selectId) {
+      const response = await fetch("/api/conversations");
+      const data = await response.json();
+      const conversations = data.conversations || [];
+      if (!conversations.length) return;
+      renderConversationList(conversations, selectId || currentConversationId || conversations[0].id);
+      if (!currentConversationId) {
+        switchConversation(selectId || conversations[0].id, false);
+      }
+    }
+
+    function renderConversationList(conversations, activeId) {
+      conversationList.innerHTML = "";
+      for (const conversation of conversations) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "conversation-item" + (conversation.id === activeId ? " active" : "");
+        button.textContent = conversation.title;
+        button.disabled = isBusy;
+        button.addEventListener("click", () => switchConversation(conversation.id, true));
+        conversationList.appendChild(button);
+      }
+    }
+
+    async function switchConversation(conversationId, shouldSave) {
+      if (isBusy) return;
+      if (shouldSave) saveCurrentChat();
+      currentConversationId = conversationId;
+      if (chatViews[conversationId]) {
+        restoreChat(conversationId);
+      } else {
+        await restoreConversationFromServer(conversationId);
+      }
+      await loadMemoryStats(conversationId);
+      await loadConversations(conversationId);
+    }
+
+    async function createNewConversation() {
+      if (isBusy) return;
+      saveCurrentChat();
+      const response = await fetch("/api/conversations", {method: "POST"});
+      const data = await response.json();
+      currentConversationId = data.conversation.id;
+      chatViews[currentConversationId] = welcomeHtml();
+      restoreChat(currentConversationId);
+      await loadMemoryStats(currentConversationId);
+      await loadConversations(currentConversationId);
+      input.focus();
+    }
 
     function addMessage(text, role) {
       const el = document.createElement("div");
@@ -479,8 +727,14 @@ HTML = r"""<!doctype html>
       event.preventDefault();
       const text = input.value.trim();
       if (!text) return;
+      if (!currentConversationId) {
+        await createNewConversation();
+      }
       input.value = "";
       send.disabled = true;
+      newChat.disabled = true;
+      isBusy = true;
+      await loadConversations(currentConversationId);
       addMessage(text, "user");
       const panel = createThinkingPanel();
       const stopStatus = startThinkingStatus(panel);
@@ -495,7 +749,7 @@ HTML = r"""<!doctype html>
         const response = await fetch("/api/chat_stream", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({message: text})
+          body: JSON.stringify({message: text, conversation_id: currentConversationId})
         });
         if (!response.ok || !response.body) {
           const data = await response.json();
@@ -533,6 +787,12 @@ HTML = r"""<!doctype html>
               stopStatus();
               finalAnswer = event.final_answer || "";
               panel.state.textContent = gotStep ? "完成" : "没有工具调用步骤";
+              if (event.memory) {
+                setMemoryStats(event.memory);
+              }
+              if (event.conversation) {
+                await loadConversations(event.conversation.id);
+              }
             } else if (event.type === "error") {
               stopStatus();
               waiting.textContent = event.error || "请求失败。";
@@ -548,10 +808,16 @@ HTML = r"""<!doctype html>
         waiting.textContent = "请求失败：" + error;
         panel.state.textContent = "请求失败";
       } finally {
+        saveCurrentChat();
+        isBusy = false;
         send.disabled = false;
+        newChat.disabled = false;
+        await loadConversations(currentConversationId);
         input.focus();
       }
     });
+    newChat.addEventListener("click", createNewConversation);
+    loadConversations();
   </script>
 </body>
 </html>
@@ -560,12 +826,34 @@ HTML = r"""<!doctype html>
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path in {"/", "/index.html"}:
+        parsed = urlparse(self.path)
+        if parsed.path in {"/", "/index.html"}:
             self._send_text(200, HTML, "text/html; charset=utf-8")
+            return
+        if parsed.path == "/api/conversations":
+            self._send_json(200, {"conversations": list_conversations()})
+            return
+        if parsed.path == "/api/conversation":
+            params = parse_qs(parsed.query)
+            conversation_id = params.get("conversation_id", [DEFAULT_CONVERSATION_ID])[0]
+            conversation = get_conversation(conversation_id)
+            self._send_json(200, ui_payload(conversation))
+            return
+        if parsed.path == "/api/memory":
+            params = parse_qs(parsed.query)
+            conversation_id = params.get("conversation_id", [DEFAULT_CONVERSATION_ID])[0]
+            conversation = get_conversation(conversation_id)
+            self._send_json(200, conversation["agent"].memory.stats())
             return
         self._send_json(404, {"error": "Not found"})
 
     def do_POST(self):
+        if self.path == "/api/conversations":
+            conversation_id, conversation = create_conversation("新对话")
+            CONVERSATIONS[conversation_id] = conversation
+            self._send_json(200, {"conversation": conversation_payload(conversation)})
+            return
+
         if self.path == "/api/chat_stream":
             self._handle_chat_stream()
             return
@@ -579,26 +867,38 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8")
             payload = json.loads(body or "{}")
             message = str(payload.get("message", "")).strip()
+            conversation_id = str(payload.get("conversation_id", DEFAULT_CONVERSATION_ID)).strip()
+            conversation = get_conversation(conversation_id)
             if not message:
                 self._send_json(400, {"error": "message 不能为空"})
                 return
 
-            result = AGENT.run(message)
+            if conversation["title"] == "新对话":
+                conversation["title"] = title_from_message(message)
+            conversation["updated_at"] = time.time()
+            result = conversation["agent"].run(message)
+            step_payloads = [
+                {
+                    "index": step.index,
+                    "thought": step.thought,
+                    "action": step.action,
+                    "action_input": step.action_input,
+                    "observation": step.observation,
+                    "final_answer": step.final_answer,
+                    "summary": MiniReActAgent._natural_step_summary(step),
+                }
+                for step in result.steps
+            ]
+            conversation["ui_messages"].append({"role": "user", "content": message})
+            conversation["ui_messages"].append(
+                {"role": "assistant", "content": result.final_answer, "steps": step_payloads}
+            )
             self._send_json(
                 200,
                 {
                     "final_answer": result.final_answer,
-                    "steps": [
-                        {
-                            "index": step.index,
-                            "thought": step.thought,
-                            "action": step.action,
-                            "action_input": step.action_input,
-                            "observation": step.observation,
-                            "final_answer": step.final_answer,
-                        }
-                        for step in result.steps
-                    ],
+                    "steps": step_payloads,
+                    "conversation": conversation_payload(conversation),
                 },
             )
         except Exception as exc:
@@ -610,9 +910,16 @@ class Handler(BaseHTTPRequestHandler):
             body = self.rfile.read(length).decode("utf-8")
             payload = json.loads(body or "{}")
             message = str(payload.get("message", "")).strip()
+            conversation_id = str(payload.get("conversation_id", DEFAULT_CONVERSATION_ID)).strip()
+            conversation = get_conversation(conversation_id)
             if not message:
                 self._send_json(400, {"error": "message 不能为空"})
                 return
+            if conversation["title"] == "新对话":
+                conversation["title"] = title_from_message(message)
+            conversation["updated_at"] = time.time()
+            conversation["ui_messages"].append({"role": "user", "content": message})
+            streamed_steps = []
 
             self.send_response(200)
             self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
@@ -620,15 +927,23 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("X-Accel-Buffering", "no")
             self.end_headers()
 
-            for event in AGENT.run_events(message):
+            for event in conversation["agent"].run_events(message):
                 if event["type"] == "done":
                     result = event["result"]
+                    conversation["updated_at"] = time.time()
+                    conversation["ui_messages"].append(
+                        {"role": "assistant", "content": result.final_answer, "steps": streamed_steps}
+                    )
                     payload = {
                         "type": "done",
                         "final_answer": result.final_answer,
+                        "conversation": conversation_payload(conversation),
+                        "memory": conversation["agent"].memory.stats(),
                     }
                 else:
                     payload = event
+                    if event["type"] == "step":
+                        streamed_steps.append(event["step"])
                 self._write_stream_event(payload)
         except Exception as exc:
             try:

@@ -24,6 +24,8 @@ class Settings:
     base_url: str
     model: str
     max_steps: int = 6
+    memory_max_messages: int = 16
+    memory_max_chars: int = 12000
 
 
 def get_settings() -> Settings:
@@ -32,6 +34,8 @@ def get_settings() -> Settings:
     base_url = os.getenv("MODELSCOPE_BASE_URL", "https://api-inference.modelscope.cn/v1/").strip()
     model = os.getenv("MODELSCOPE_MODEL", "deepseek-ai/DeepSeek-V4-Flash").strip()
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "6"))
+    memory_max_messages = int(os.getenv("MEMORY_MAX_MESSAGES", "16"))
+    memory_max_chars = int(os.getenv("MEMORY_MAX_CHARS", "12000"))
 
     if not api_key:
         raise RuntimeError("缺少 MODELSCOPE_API_KEY，请先在 .env 中配置密钥。")
@@ -41,4 +45,6 @@ def get_settings() -> Settings:
         base_url=base_url,
         model=model,
         max_steps=max_steps,
+        memory_max_messages=memory_max_messages,
+        memory_max_chars=memory_max_chars,
     )

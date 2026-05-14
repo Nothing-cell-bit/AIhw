@@ -31,7 +31,10 @@ class MiniReActAgent:
         settings = get_settings()
         self.max_steps = settings.max_steps
         self.llm = llm or LLMClient()
-        self.memory = memory or ConversationMemory()
+        self.memory = memory or ConversationMemory(
+            max_messages=settings.memory_max_messages,
+            max_chars=settings.memory_max_chars,
+        )
 
     def run(self, user_input: str) -> AgentResult:
         final_result = None

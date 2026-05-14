@@ -12,8 +12,9 @@
   - `wikipedia_search`：维基百科搜索摘要
   - `file_write`：写入本地文件
   - `file_read`：读取本地文件
-- 提供命令行版本和 Streamlit Web 界面
-- 支持对话历史裁剪，避免上下文无限增长
+- 提供命令行版本、Streamlit Web 界面和零依赖 Web 界面
+- 支持对话历史管理，维护 `messages` 列表并按长度限制自动压缩旧上下文
+- 零依赖 Web 页面支持多对话列表，新建对话拥有独立 Agent 与独立上下文
 
 ## 项目结构
 
@@ -49,6 +50,8 @@ pip install -r requirements.txt
 MODELSCOPE_API_KEY=你的密钥
 MODELSCOPE_BASE_URL=https://api-inference.modelscope.cn/v1/
 MODELSCOPE_MODEL=deepseek-ai/DeepSeek-V4-Flash
+MEMORY_MAX_MESSAGES=16
+MEMORY_MAX_CHARS=12000
 ```
 
 ## 命令行运行
@@ -121,3 +124,25 @@ Agent 每一轮都会把用户任务、对话历史和工具说明发给 LLM。L
 ```
 
 程序解析 JSON 后执行对应工具，并把工具结果作为 observation 再发给 LLM，直到得到 `final_answer` 或达到最大步数。
+
+## 对话历史管理
+
+[memory.py](memory.py) 负责维护 Agent 的 `messages` 列表：
+
+- 第一条始终保留系统提示词
+- 用户输入、模型输出、工具观察结果都会追加到 `messages`
+- 当消息数量超过 `MEMORY_MAX_MESSAGES`，或估算字符数超过 `MEMORY_MAX_CHARS` 时，会自动裁剪旧消息
+- 被裁剪的旧消息会压缩进一条“较早对话摘要”，保留必要上下文
+- 最近消息优先级最高，如果摘要与最近消息冲突，模型会优先相信最近消息
+
+零依赖 Web 页面侧边栏会显示当前对话的记忆状态：消息数、上下文字符数、摘要字符数。
+
+## 多对话管理
+
+零依赖 Web 版本支持多个互相隔离的对话：
+
+- 点击左侧“新建对话”会创建一个全新的 `MiniReActAgent`
+- 每个对话都有独立的 `ConversationMemory`
+- 新对话不会继承旧对话的上下文
+- 切换对话时，页面会保存并恢复各自的聊天内容
+- 正在生成回答时会临时禁用切换，避免流式输出写入错误对话
