@@ -26,6 +26,15 @@ class Settings:
     max_steps: int = 6
     memory_max_messages: int = 16
     memory_max_chars: int = 12000
+    multi_agent_enabled: bool = False
+    planner_max_steps: int = 8
+    executor_max_steps: int = 8
+    replan_max_attempts: int = 1
+    final_answer_streaming: bool = True
+    long_term_memory_enabled: bool = False
+    long_term_memory_path: str = "data/memory.sqlite3"
+    long_term_memory_top_k: int = 5
+    memory_extract_importance_threshold: float = 0.6
 
 
 def get_settings() -> Settings:
@@ -37,9 +46,6 @@ def get_settings() -> Settings:
     memory_max_messages = int(os.getenv("MEMORY_MAX_MESSAGES", "16"))
     memory_max_chars = int(os.getenv("MEMORY_MAX_CHARS", "12000"))
 
-    if not api_key:
-        raise RuntimeError("缺少 MODELSCOPE_API_KEY，请先在 .env 中配置密钥。")
-
     return Settings(
         api_key=api_key,
         base_url=base_url,
@@ -47,4 +53,20 @@ def get_settings() -> Settings:
         max_steps=max_steps,
         memory_max_messages=memory_max_messages,
         memory_max_chars=memory_max_chars,
+        multi_agent_enabled=_env_bool("MULTI_AGENT_ENABLED", False),
+        planner_max_steps=int(os.getenv("PLANNER_MAX_STEPS", "8")),
+        executor_max_steps=int(os.getenv("EXECUTOR_MAX_STEPS", "8")),
+        replan_max_attempts=int(os.getenv("REPLAN_MAX_ATTEMPTS", "1")),
+        final_answer_streaming=_env_bool("FINAL_ANSWER_STREAMING", True),
+        long_term_memory_enabled=_env_bool("LONG_TERM_MEMORY_ENABLED", False),
+        long_term_memory_path=os.getenv("LONG_TERM_MEMORY_PATH", "data/memory.sqlite3").strip(),
+        long_term_memory_top_k=int(os.getenv("LONG_TERM_MEMORY_TOP_K", "5")),
+        memory_extract_importance_threshold=float(os.getenv("MEMORY_EXTRACT_IMPORTANCE_THRESHOLD", "0.6")),
     )
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}

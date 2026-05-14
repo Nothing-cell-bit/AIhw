@@ -27,6 +27,11 @@ with st.sidebar:
     st.write("wikipedia_search")
     st.write("file_write")
     st.write("file_read")
+    st.write("game_create")
+    st.write("game_player_move")
+    st.write("game_ai_move")
+    st.write("game_analyze")
+    st.write("game_resign")
     if st.button("清空对话"):
         st.session_state.agent = create_agent()
         st.session_state.chat_history = []

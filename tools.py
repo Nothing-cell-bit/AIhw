@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Dict
 from urllib import error, parse, request
 
+from game import GameError
+from game_tools import game_ai_move, game_analyze, game_create, game_player_move, game_resign
+
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -136,6 +139,11 @@ TOOLS = {
     "wikipedia_search": wikipedia_search,
     "file_write": file_write,
     "file_read": file_read,
+    "game_create": game_create,
+    "game_player_move": game_player_move,
+    "game_ai_move": game_ai_move,
+    "game_analyze": game_analyze,
+    "game_resign": game_resign,
 }
 
 
@@ -149,6 +157,8 @@ def run_tool(name: str, action_input: Dict[str, Any]) -> str:
         return TOOLS[name](**action_input)
     except TypeError as exc:
         return f"工具参数错误：{exc}"
+    except GameError as exc:
+        return f"工具执行失败：{exc}"
     except ToolError as exc:
         return f"工具执行失败：{exc}"
     except Exception as exc:
