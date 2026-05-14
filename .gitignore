@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.streamlit/
+data/test.txt
+data/*.sqlite3
+data/*.sqlite3-*
