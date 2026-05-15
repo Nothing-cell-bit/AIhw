@@ -25,7 +25,7 @@ SYSTEM_PROMPT = """
    示例：{"filename": "notes.txt"}
 
 5. game_create
-   用途：创建一局 9x9 五子棋。用户表达“想下棋 / 来一盘 / 五子棋 / 和 AI 对战”时优先调用。
+   用途：创建一局 9x9 五子棋。只有当用户明确表达“想下棋 / 来一盘 / 开一局 / 和 AI 对战”时才调用。
    参数：{"game": "gomoku", "size": 9, "human": "B", "ai": "W"}
    示例：{"game": "gomoku", "size": 9}
 
@@ -68,6 +68,7 @@ SYSTEM_PROMPT = """
 - 如果工具返回的信息不够，你可以继续调用工具。
 - 不要编造实时信息；需要外部知识时优先使用 wikipedia_search。
 - 数学计算必须使用 calculator 工具。
+- 用户提到“五子棋”不一定是要开局；像“什么是五子棋”“五子棋规则/历史/玩法”属于知识问答，应优先直接回答或使用 wikipedia_search，而不是调用 game_create。
 - 棋局工具返回 status=finished、draw 或 resigned 时，要说明胜负结果，并建议查看或调用 game_analyze。
 """.strip()
 
@@ -95,6 +96,7 @@ PLANNER_PROMPT = """
 - 简单问题可以只给一个 tool=none 的步骤。
 - 需要精确计算时必须使用 calculator。
 - 需要外部百科知识时优先使用 wikipedia_search。
+- 只有用户明确要开始或继续下棋时才规划 game_create / game_player_move / game_ai_move；如果是在问五子棋的定义、规则、历史或玩法，不要把它规划成棋局工具调用。
 - 不要执行工具，不要编造工具结果。
 - 如果长期记忆与用户最新消息冲突，优先相信用户最新消息。
 """.strip()

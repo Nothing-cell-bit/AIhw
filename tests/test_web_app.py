@@ -18,8 +18,10 @@ class WebAppTests(unittest.TestCase):
 
     def test_game_intent_is_handled_without_llm(self):
         self.assertIn("function isGameIntent(text)", web_app.HTML)
+        self.assertIn("function isGameKnowledgeQuery(text)", web_app.HTML)
         self.assertIn("await createGame();", web_app.HTML)
         self.assertIn("落子后 AI 会自动下一步", web_app.HTML)
+        self.assertNotIn("/下棋|五子棋|来一盘|开一局|对弈|棋局/.test(text)", web_app.HTML)
 
     def test_game_panel_has_no_new_game_button(self):
         self.assertNotIn("game-new", web_app.HTML)

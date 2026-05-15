@@ -1311,8 +1311,13 @@ HTML = r"""<!doctype html>
       return () => clearInterval(timer);
     }
 
+    function isGameKnowledgeQuery(text) {
+      return /什么是五子棋|五子棋是什么|五子棋.*(规则|玩法|介绍|起源|历史|怎么下|怎么玩)|介绍一下五子棋/.test(text);
+    }
+
     function isGameIntent(text) {
-      return /下棋|五子棋|来一盘|开一局|对弈|棋局/.test(text);
+      if (isGameKnowledgeQuery(text)) return false;
+      return /想下棋|想玩五子棋|来一盘|开一局|开始下棋|开始五子棋|和AI下棋|和 AI 下棋|和AI对弈|和 AI 对弈|对弈一局|创建棋局/.test(text);
     }
 
     form.addEventListener("submit", async (event) => {
