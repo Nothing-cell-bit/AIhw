@@ -63,7 +63,7 @@ class MiniReActAgent:
                 "message": f"第 {step_index} 轮：正在让模型判断下一步该怎么做。",
             }
             try:
-                raw_output = self.llm.chat(self.memory.get_messages())
+                raw_output = yield from self._stream_legacy_decision(step_index)
             except LLMEmptyResponseError:
                 final_answer = self._fallback_answer(user_input, steps)
                 step = AgentStep(
@@ -159,6 +159,46 @@ class MiniReActAgent:
 
         final_answer = "达到最大思考步数，任务尚未完成。请缩小问题范围或稍后重试。"
         yield {"type": "done", "result": AgentResult(final_answer=final_answer, steps=steps)}
+
+    def _stream_legacy_decision(self, step_index: int) -> Iterator[Dict[str, Any]]:
+        messages = self.memory.get_messages()
+        content_chunks: List[str] = []
+        emitted_reasoning = False
+
+        if hasattr(self.llm, "chat_stream_events"):
+            try:
+                for event in self.llm.chat_stream_events(messages):
+                    kind = str(event.get("kind", "")).strip()
+                    delta = str(event.get("delta", ""))
+                    if not delta:
+                        continue
+                    if kind == "reasoning":
+                        emitted_reasoning = True
+                        yield {
+                            "type": "reasoning_delta",
+                            "agent": "legacy",
+                            "message": f"第 {step_index} 轮：模型正在思考。",
+                            "payload": {"stage": "legacy_decision", "delta": delta, "step_index": step_index},
+                            "delta": delta,
+                        }
+                    elif kind == "content":
+                        content_chunks.append(delta)
+            except Exception:
+                content_chunks = []
+                emitted_reasoning = False
+
+        if emitted_reasoning:
+            yield {
+                "type": "reasoning_done",
+                "agent": "legacy",
+                "message": f"第 {step_index} 轮：模型已形成当前决策。",
+                "payload": {"stage": "legacy_decision", "step_index": step_index},
+            }
+
+        content = "".join(content_chunks).strip()
+        if content:
+            return content
+        return self.llm.chat(messages)
 
     def _stream_legacy_final_answer(
         self,

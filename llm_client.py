@@ -62,6 +62,11 @@ class LLMClient:
         raise last_error or LLMEmptyResponseError("LLM API 连续返回空内容。")
 
     def chat_stream(self, messages: List[Dict[str, str]], max_tokens: int = 1200) -> Iterator[str]:
+        for event in self.chat_stream_events(messages, max_tokens=max_tokens):
+            if event["kind"] == "content":
+                yield event["delta"]
+
+    def chat_stream_events(self, messages: List[Dict[str, str]], max_tokens: int = 1200) -> Iterator[Dict[str, str]]:
         payload = {
             "model": self.model,
             "messages": messages,
@@ -69,7 +74,7 @@ class LLMClient:
             "max_tokens": max_tokens,
             "stream": True,
         }
-        yield from self._post_stream("/chat/completions", payload)
+        yield from self._post_stream_events("/chat/completions", payload)
 
     def _post_json(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -94,7 +99,7 @@ class LLMClient:
 
         return json.loads(text)
 
-    def _post_stream(self, path: str, payload: Dict[str, Any]) -> Iterator[str]:
+    def _post_stream_events(self, path: str, payload: Dict[str, Any]) -> Iterator[Dict[str, str]]:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = request.Request(
             f"{self.base_url}{path}",
@@ -109,7 +114,7 @@ class LLMClient:
 
         try:
             with request.urlopen(req, timeout=60) as response:
-                yield from self._iter_sse_deltas(response)
+                yield from self._iter_sse_events(response)
         except error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"LLM API 流式请求失败：HTTP {exc.code} {detail}") from exc
@@ -151,29 +156,37 @@ class LLMClient:
         )
 
     @staticmethod
-    def _extract_delta(data: Dict[str, Any]) -> str:
+    def _extract_delta_parts(data: Dict[str, Any]) -> Dict[str, str]:
         choices = data.get("choices") or []
         if not choices:
-            return ""
+            return {}
 
         choice = choices[0]
         delta = choice.get("delta")
         if isinstance(delta, dict):
-            content = delta.get("content") or delta.get("reasoning_content")
-            if content:
-                return str(content)
+            result: Dict[str, str] = {}
+            if delta.get("reasoning_content"):
+                result["reasoning"] = str(delta["reasoning_content"])
+            if delta.get("content"):
+                result["content"] = str(delta["content"])
+            if result:
+                return result
 
         message = choice.get("message")
         if isinstance(message, dict):
-            content = message.get("content") or message.get("reasoning_content")
-            if content:
-                return str(content)
+            result = {}
+            if message.get("reasoning_content"):
+                result["reasoning"] = str(message["reasoning_content"])
+            if message.get("content"):
+                result["content"] = str(message["content"])
+            if result:
+                return result
 
         text = choice.get("text")
-        return str(text) if text else ""
+        return {"content": str(text)} if text else {}
 
     @classmethod
-    def _iter_sse_deltas(cls, lines: Iterable[Union[str, bytes]]) -> Iterator[str]:
+    def _iter_sse_events(cls, lines: Iterable[Union[str, bytes]]) -> Iterator[Dict[str, str]]:
         for raw_line in lines:
             line = raw_line.decode("utf-8", errors="replace") if isinstance(raw_line, bytes) else raw_line
             line = line.strip()
@@ -187,9 +200,17 @@ class LLMClient:
                 data = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            delta = cls._extract_delta(data)
-            if delta:
-                yield delta
+            parts = cls._extract_delta_parts(data)
+            if parts.get("reasoning"):
+                yield {"kind": "reasoning", "delta": parts["reasoning"]}
+            if parts.get("content"):
+                yield {"kind": "content", "delta": parts["content"]}
+
+    @classmethod
+    def _iter_sse_deltas(cls, lines: Iterable[Union[str, bytes]]) -> Iterator[str]:
+        for event in cls._iter_sse_events(lines):
+            if event["kind"] == "content":
+                yield event["delta"]
 
     @staticmethod
     def _build_retry_messages(messages: List[Dict[str, str]]) -> List[Dict[str, str]]:

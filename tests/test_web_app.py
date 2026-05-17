@@ -57,6 +57,9 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("const cellSize = board.length >= 19 ? 24 : board.length >= 15 ? 28 : board.length >= 13 ? 32 : 36;", web_app.HTML)
         self.assertIn("chatPayload.current_game_id = gameState.game_id;", web_app.HTML)
         self.assertIn('if (step.action === "game_moves") {', web_app.HTML)
+        self.assertIn("function renderReasoningDelta(panel, event)", web_app.HTML)
+        self.assertIn("function finalizeReasoning(panel, event)", web_app.HTML)
+        self.assertIn('} else if (event.type === "reasoning_delta") {', web_app.HTML)
 
     def test_game_ai_move_api_returns_draw_for_full_board(self):
         GAMES.clear()
@@ -272,6 +275,63 @@ class WebAppTests(unittest.TestCase):
             self.assertIn("game_id=game-123", captured["message"])
             self.assertIn("size=15", captured["message"])
             self.assertIn("status=draw", captured["message"])
+        finally:
+            server.shutdown()
+            server.server_close()
+            web_app.get_agent = original_agent_factory
+
+    def test_chat_stream_forwards_reasoning_delta_events(self):
+        original_agent_factory = web_app.get_agent
+
+        class StreamingReasoningAgent:
+            memory = type(
+                "Memory",
+                (),
+                {
+                    "stats": staticmethod(
+                        lambda: {
+                            "message_count": 1,
+                            "max_messages": 16,
+                            "estimated_chars": 0,
+                            "max_chars": 12000,
+                            "summary_chars": 0,
+                        }
+                    )
+                },
+            )()
+
+            def run_events(self, message):
+                yield {
+                    "type": "reasoning_delta",
+                    "agent": "planner",
+                    "delta": "先判断用户问题。",
+                    "payload": {"stage": "planning", "delta": "先判断用户问题。"},
+                }
+                yield {
+                    "type": "reasoning_done",
+                    "agent": "planner",
+                    "payload": {"stage": "planning"},
+                }
+                yield {"type": "done", "result": AgentResult(final_answer="ok", steps=[])}
+
+        web_app.get_agent = lambda conversation: StreamingReasoningAgent()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web_app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            body = json.dumps({"message": "hello"}).encode("utf-8")
+            req = request.Request(
+                f"http://127.0.0.1:{server.server_address[1]}/api/chat_stream",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with request.urlopen(req, timeout=10) as response:
+                lines = [json.loads(line) for line in response.read().decode("utf-8").splitlines() if line]
+
+            self.assertEqual(lines[0]["type"], "reasoning_delta")
+            self.assertEqual(lines[1]["type"], "reasoning_done")
+            self.assertEqual(lines[-1]["final_answer"], "ok")
         finally:
             server.shutdown()
             server.server_close()

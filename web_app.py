@@ -372,6 +372,9 @@ HTML = r"""<!doctype html>
       border-bottom: 1px solid #edf0f5;
       animation: fadeIn .26s ease-out both;
     }
+    .step-live {
+      background: linear-gradient(90deg, rgba(224, 242, 254, 0.28), rgba(255, 255, 255, 0));
+    }
     .step:last-child {
       border-bottom: 0;
     }
@@ -1265,7 +1268,61 @@ HTML = r"""<!doctype html>
       panel.appendChild(steps);
       chat.appendChild(panel);
       chat.scrollTop = chat.scrollHeight;
-      return { panel, state, steps };
+      return { panel, state, steps, liveReasoning: {} };
+    }
+
+    function reasoningKey(event) {
+      const agent = event?.agent || "agent";
+      const stage = event?.payload?.stage || "thinking";
+      return `${agent}:${stage}`;
+    }
+
+    function reasoningLabel(event) {
+      const stage = event?.payload?.stage || "thinking";
+      if (event?.agent === "planner") return stage === "planning" ? "规划推理" : "规划思考";
+      if (event?.agent === "executor") return stage === "execution" ? "执行推理" : "执行思考";
+      return "思考增量";
+    }
+
+    function renderReasoningDelta(panel, event) {
+      const delta = event?.delta || event?.payload?.delta || "";
+      if (!delta) return;
+      const key = reasoningKey(event);
+      let block = panel.liveReasoning[key];
+      if (!block) {
+        const item = document.createElement("div");
+        item.className = "step step-live";
+        item.dataset.reasoningKey = key;
+        const index = document.createElement("div");
+        index.className = "step-index";
+        index.textContent = event.agent === "planner" ? "P*" : event.agent === "executor" ? "E*" : "...";
+        const body = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "step-title";
+        title.textContent = reasoningLabel(event);
+        const text = document.createElement("div");
+        text.className = "step-text";
+        text.textContent = "";
+        body.appendChild(title);
+        body.appendChild(text);
+        item.appendChild(index);
+        item.appendChild(body);
+        panel.steps.appendChild(item);
+        block = { item, title, text };
+        panel.liveReasoning[key] = block;
+      }
+      block.text.textContent += delta;
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function finalizeReasoning(panel, event) {
+      const key = reasoningKey(event);
+      const block = panel.liveReasoning[key];
+      if (!block) return;
+      block.title.textContent = reasoningLabel(event) + "（完成）";
+      block.item.classList.remove("step-live");
+      delete panel.liveReasoning[key];
+      chat.scrollTop = chat.scrollHeight;
     }
 
     function formatActionInput(step) {
@@ -1507,6 +1564,15 @@ HTML = r"""<!doctype html>
             const event = JSON.parse(line);
             if (event.type === "status") {
               panel.state.textContent = event.message;
+            } else if (event.type === "reasoning_delta") {
+              gotStep = true;
+              stopStatus();
+              panel.state.textContent = event.message || "正在输出思考过程";
+              renderReasoningDelta(panel, event);
+            } else if (event.type === "reasoning_done") {
+              stopStatus();
+              panel.state.textContent = event.message || "当前思考片段已完成";
+              finalizeReasoning(panel, event);
             } else if (event.type === "plan") {
               gotStep = true;
               stopStatus();

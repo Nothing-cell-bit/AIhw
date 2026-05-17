@@ -54,21 +54,39 @@ class TaskPlan:
 class PlannerAgent:
     def __init__(self, llm: LLMClient) -> None:
         self.llm = llm
+        self._last_plan: Optional[TaskPlan] = None
 
     def plan(self, user_input: str, context: str = "") -> TaskPlan:
+        for _ in self.plan_events(user_input, context):
+            pass
+        return self._last_plan or TaskPlan(
+            thought="规划 Agent 没有返回结果，使用单步兜底计划。",
+            goal=user_input,
+            steps=[PlanStep(id=1, description=user_input, tool="none")],
+        )
+
+    def plan_events(self, user_input: str, context: str = "") -> Iterator[Dict[str, Any]]:
+        self._last_plan = None
         messages = [
             {"role": "system", "content": PLANNER_PROMPT},
             {"role": "user", "content": self._build_user_prompt(user_input, context)},
         ]
-        raw_output = self.llm.chat(messages)
+        raw_output = yield from _stream_json_events(
+            self.llm,
+            messages,
+            agent="planner",
+            stage="planning",
+            message="规划 Agent 正在思考。",
+        )
         parsed = _parse_json(raw_output)
         if not parsed:
-            return TaskPlan(
+            self._last_plan = TaskPlan(
                 thought="规划 Agent 没有返回合法 JSON，使用单步兜底计划。",
                 goal=user_input,
                 steps=[PlanStep(id=1, description=user_input, tool="none")],
                 raw_output=raw_output,
             )
+            return
 
         steps = []
         for index, item in enumerate(parsed.get("steps") or [], 1):
@@ -87,7 +105,7 @@ class PlannerAgent:
         if not steps:
             steps = [PlanStep(id=1, description=user_input, tool="none")]
 
-        return TaskPlan(
+        self._last_plan = TaskPlan(
             thought=str(parsed.get("thought", "")),
             goal=str(parsed.get("goal") or user_input),
             steps=steps,
@@ -95,6 +113,7 @@ class PlannerAgent:
             risks=[str(item) for item in parsed.get("risks", []) if item],
             raw_output=raw_output,
         )
+        return
 
     @staticmethod
     def _build_user_prompt(user_input: str, context: str) -> str:
@@ -135,7 +154,7 @@ class ExecutorAgent:
                 message=f"执行计划步骤 {plan_step.id}：{plan_step.description}",
             )
 
-            decision = self._decide_step(plan, plan_step, user_input, memory)
+            decision = yield from self._decide_step_events(plan, plan_step, user_input, memory)
             if decision.get("needs_replan"):
                 yield make_event(
                     "status",
@@ -227,6 +246,57 @@ class ExecutorAgent:
             return {"thought": "执行 Agent 返回格式不可解析。", "final_answer": plan_step.description}
         return parsed
 
+    def _decide_step_events(
+        self,
+        plan: TaskPlan,
+        plan_step: PlanStep,
+        user_input: str,
+        memory: ConversationMemory,
+    ) -> Iterator[Dict[str, Any]]:
+        if plan_step.tool and plan_step.tool != "none":
+            yield make_event(
+                "reasoning_delta",
+                agent="executor",
+                message="执行 Agent 正在思考。",
+                payload={"stage": "execution", "delta": f"按计划直接执行：{plan_step.description}"},
+                delta=f"按计划直接执行：{plan_step.description}",
+            )
+            yield make_event(
+                "reasoning_done",
+                agent="executor",
+                message="执行 Agent 已形成当前步骤决策。",
+                payload={"stage": "execution"},
+            )
+            return {
+                "thought": f"按计划执行：{plan_step.description}",
+                "action": plan_step.tool,
+                "action_input": plan_step.tool_input,
+            }
+
+        messages = [
+            {"role": "system", "content": EXECUTOR_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"用户任务：{user_input}\n\n"
+                    f"整体计划：{json.dumps(plan.to_dict(), ensure_ascii=False)}\n\n"
+                    f"当前步骤：{json.dumps(plan_step.__dict__, ensure_ascii=False)}\n\n"
+                    f"当前短期上下文：{json.dumps(memory.get_messages()[-6:], ensure_ascii=False)}"
+                ),
+            },
+        ]
+        raw_output = yield from _stream_json_events(
+            self.llm,
+            messages,
+            agent="executor",
+            stage="execution",
+            message="执行 Agent 正在思考。",
+        )
+        parsed = _parse_json(raw_output)
+        if not parsed:
+            return {"thought": "执行 Agent 返回格式不可解析。", "final_answer": plan_step.description}
+        return parsed
+
 
 class AgentCoordinator:
     def __init__(
@@ -251,7 +321,12 @@ class AgentCoordinator:
         long_term_context = self._long_term_context(user_input)
 
         yield make_event("status", agent="coordinator", message="正在检索记忆并规划任务。")
-        plan = self.planner.plan(user_input, long_term_context)
+        yield from self.planner.plan_events(user_input, long_term_context)
+        plan = self.planner._last_plan or TaskPlan(
+            thought="规划 Agent 没有返回结果，使用单步兜底计划。",
+            goal=user_input,
+            steps=[PlanStep(id=1, description=user_input, tool="none")],
+        )
         yield make_event("plan", agent="planner", message="规划已生成。", payload=plan.to_dict())
 
         streamed_steps: List[AgentStep] = []
@@ -383,6 +458,55 @@ def _strip_meta_answer(text: str) -> str:
         if index != -1:
             return cleaned[index + len(marker) :].strip()
     return cleaned
+
+
+def _stream_json_events(
+    llm: LLMClient,
+    messages: List[Dict[str, str]],
+    *,
+    agent: str,
+    stage: str,
+    message: str,
+) -> Iterator[Dict[str, Any]]:
+    content_chunks: List[str] = []
+    used_stream = False
+    emitted_reasoning = False
+
+    if hasattr(llm, "chat_stream_events"):
+        try:
+            for event in llm.chat_stream_events(messages):
+                used_stream = True
+                kind = str(event.get("kind", "")).strip()
+                delta = str(event.get("delta", ""))
+                if not delta:
+                    continue
+                if kind == "reasoning":
+                    emitted_reasoning = True
+                    yield make_event(
+                        "reasoning_delta",
+                        agent=agent,
+                        message=message,
+                        payload={"stage": stage, "delta": delta},
+                        delta=delta,
+                    )
+                elif kind == "content":
+                    content_chunks.append(delta)
+        except Exception:
+            content_chunks = []
+            used_stream = False
+
+    if emitted_reasoning:
+        yield make_event(
+            "reasoning_done",
+            agent=agent,
+            message=f"{message}已结束。",
+            payload={"stage": stage},
+        )
+
+    content = "".join(content_chunks).strip()
+    if content:
+        return content
+    return llm.chat(messages)
 
 
 def _dedupe_repeated_answer(text: str) -> str:

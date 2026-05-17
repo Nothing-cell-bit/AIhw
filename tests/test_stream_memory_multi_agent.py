@@ -59,6 +59,20 @@ class StreamParsingTest(unittest.TestCase):
         ]
         self.assertEqual(list(LLMClient._iter_sse_deltas(lines)), ["你", "好"])
 
+    def test_iter_sse_events_splits_reasoning_and_content(self):
+        lines = [
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"先判断\"}}]}\n".encode("utf-8"),
+            "data: {\"choices\":[{\"delta\":{\"content\":\"最终\"}}]}\n".encode("utf-8"),
+            "data: [DONE]\n".encode("utf-8"),
+        ]
+        self.assertEqual(
+            list(LLMClient._iter_sse_events(lines)),
+            [
+                {"kind": "reasoning", "delta": "先判断"},
+                {"kind": "content", "delta": "最终"},
+            ],
+        )
+
 
 class MemoryStoreTest(unittest.TestCase):
     def test_memory_store_adds_searches_and_filters_sensitive_content(self):
@@ -105,8 +119,86 @@ class MultiAgentTest(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "done")
         self.assertEqual(events[-1]["result"].final_answer, "结果是 5。")
 
+    def test_coordinator_emits_reasoning_delta_when_llm_supports_reasoning_stream(self):
+        class FakeReasoningLLM(FakeLLM):
+            def chat_stream_events(self, messages, max_tokens=1200):
+                system = messages[0]["content"]
+                if "规划 Agent" in system:
+                    yield {"kind": "reasoning", "delta": "先判断是否需要计算。"}
+                    yield {
+                        "kind": "content",
+                        "delta": json.dumps(
+                            {
+                                "thought": "需要计算",
+                                "goal": "计算表达式",
+                                "steps": [
+                                    {
+                                        "id": 1,
+                                        "description": "计算 2+3",
+                                        "tool": "calculator",
+                                        "tool_input": {"expression": "2+3"},
+                                    }
+                                ],
+                                "success_criteria": ["得到结果"],
+                                "risks": [],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {
+                "MODELSCOPE_API_KEY": "test-key",
+                "MULTI_AGENT_ENABLED": "1",
+                "FINAL_ANSWER_STREAMING": "1",
+                "LONG_TERM_MEMORY_ENABLED": "1",
+                "LONG_TERM_MEMORY_PATH": os.path.join(tmp, "memory.sqlite3"),
+            }
+            with patch.dict(os.environ, env, clear=False):
+                memory = ConversationMemory()
+                store = MemoryStore(os.environ["LONG_TERM_MEMORY_PATH"])
+                coordinator = AgentCoordinator(FakeReasoningLLM(), memory, memory_store=store)
+                events = list(coordinator.run_events("帮我算 2+3"))
+
+        event_types = [event["type"] for event in events]
+        self.assertIn("reasoning_delta", event_types)
+        self.assertIn("reasoning_done", event_types)
+
 
 class LegacyStreamingTest(unittest.TestCase):
+    def test_legacy_agent_emits_reasoning_delta_when_stream_supported(self):
+        class ReasoningLegacyLLM:
+            def chat(self, messages, stream=False):
+                return json.dumps({"thought": "可以回答", "final_answer": "后备答案"}, ensure_ascii=False)
+
+            def chat_stream_events(self, messages, max_tokens=1200):
+                yield {"kind": "reasoning", "delta": "先确认是否需要工具。"}
+                yield {
+                    "kind": "content",
+                    "delta": json.dumps({"thought": "可以直接回答", "final_answer": "原始答案"}, ensure_ascii=False),
+                }
+
+            def chat_stream(self, messages, max_tokens=1200):
+                yield "原始"
+                yield "答案"
+
+        with patch.dict(
+            os.environ,
+            {
+                "MODELSCOPE_API_KEY": "test-key",
+                "MULTI_AGENT_ENABLED": "0",
+                "FINAL_ANSWER_STREAMING": "1",
+            },
+            clear=False,
+        ):
+            agent = MiniReActAgent(llm=ReasoningLegacyLLM(), memory=ConversationMemory())
+            events = list(agent.run_events("直接回答"))
+
+        event_types = [event["type"] for event in events]
+        self.assertIn("reasoning_delta", event_types)
+        self.assertIn("reasoning_done", event_types)
+        self.assertEqual(events[-1]["result"].final_answer, "原始答案")
+
     def test_legacy_agent_streams_clean_draft_answer_without_second_model_pass(self):
         with patch.dict(
             os.environ,
