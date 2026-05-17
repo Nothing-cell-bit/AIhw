@@ -1,8 +1,8 @@
 import json
 import unittest
 
-from game import GAMES, AI, HUMAN, STATUS_PLAYING, GameError, apply_move, check_winner, new_game, store_game
-from game_ai import choose_ai_move
+from game import GAMES, AI, HUMAN, STATUS_PLAYING, GameError, apply_move, check_winner, coord_label, new_game, store_game
+from game_ai import choose_ai_move, get_search_profile
 from game_tools import game_ai_move, game_analyze, game_create, game_player_move
 
 
@@ -26,6 +26,11 @@ class GomokuGameTests(unittest.TestCase):
         result = choose_ai_move(state.board, time_limit_ms=1000, max_depth=3)
         self.assertEqual(result.move, (4, 4))
 
+    def test_ai_opens_at_center_on_13x13(self):
+        state = new_game(size=13)
+        result = choose_ai_move(state.board, time_limit_ms=1200, max_depth=3)
+        self.assertEqual(result.move, (6, 6))
+
     def test_ai_takes_immediate_win(self):
         state = new_game()
         for col in range(4):
@@ -41,17 +46,21 @@ class GomokuGameTests(unittest.TestCase):
         self.assertEqual(result.move, (3, 4))
 
     def test_tool_flow_and_analysis(self):
-        created = json.loads(game_create())
+        created = json.loads(game_create(size=13))
+        self.assertEqual(created["size"], 13)
+        self.assertEqual(created["board_label"], "13x13")
         after_human = json.loads(game_player_move(created["game_id"], 4, 4))
         self.assertEqual(after_human["board"][4][4], 1)
 
         after_ai = json.loads(game_ai_move(created["game_id"], time_limit_ms=1000, max_depth=2))
         self.assertIn("move", after_ai)
         self.assertLessEqual(after_ai["elapsed_ms"], 1000)
+        self.assertIn("ai_profile", after_ai)
 
         analysis = json.loads(game_analyze(created["game_id"]))
         self.assertEqual(analysis["metrics"]["total_moves"], 2)
         self.assertIn("summary", analysis)
+        self.assertEqual(analysis["size"], 13)
 
     def test_ai_cannot_move_twice_before_player_moves_again(self):
         created = json.loads(game_create())
@@ -92,6 +101,17 @@ class GomokuGameTests(unittest.TestCase):
         self.assertEqual(result["status"], "draw")
         self.assertEqual(result["winner"], 0)
         self.assertNotIn("move", result)
+
+    def test_supports_19x19_board_creation(self):
+        created = json.loads(game_create(size=19))
+        self.assertEqual(created["size"], 19)
+        self.assertEqual(len(created["board"]), 19)
+        self.assertEqual(len(created["board"][0]), 19)
+        self.assertEqual(created["ai_profile"]["time_limit_ms"], get_search_profile(19).time_limit_ms)
+
+    def test_coord_label_supports_double_letters(self):
+        self.assertEqual(coord_label(0, 18), "S1")
+        self.assertEqual(coord_label(0, 26), "AA1")
 
 
 if __name__ == "__main__":

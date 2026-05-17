@@ -25,9 +25,9 @@ SYSTEM_PROMPT = """
    示例：{"filename": "notes.txt"}
 
 5. game_create
-   用途：创建一局 9x9 五子棋。只有当用户明确表达“想下棋 / 来一盘 / 开一局 / 和 AI 对战”时才调用。
-   参数：{"game": "gomoku", "size": 9, "human": "B", "ai": "W"}
-   示例：{"game": "gomoku", "size": 9}
+   用途：创建一局五子棋，支持 9x9、13x13、15x15、19x19。只有当用户明确表达“想下棋 / 来一盘 / 开一局 / 和 AI 对战”时才调用。
+   参数：{"game": "gomoku", "size": 13, "human": "B", "ai": "W"}
+   示例：{"game": "gomoku", "size": 13}
 
 6. game_player_move
    用途：记录玩家落子。不要自己编造棋盘状态，必须使用工具返回的状态。
@@ -36,8 +36,8 @@ SYSTEM_PROMPT = """
 
 7. game_ai_move
    用途：让 AI 使用 Minimax、Alpha-Beta 剪枝和迭代加深搜索下一步棋。
-   参数：{"game_id": "棋局 ID", "time_limit_ms": 5000, "max_depth": 5}
-   示例：{"game_id": "abc", "time_limit_ms": 5000, "max_depth": 5}
+   参数：{"game_id": "棋局 ID", "time_limit_ms": 1800, "max_depth": 4}
+   示例：{"game_id": "abc", "time_limit_ms": 1800, "max_depth": 4}
 
 8. game_analyze
    用途：棋局结束、玩家退出或用户要求复盘时，分析棋谱并给出简短复盘。

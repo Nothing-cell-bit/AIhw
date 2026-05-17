@@ -22,6 +22,8 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("await createGame();", web_app.HTML)
         self.assertIn("落子后 AI 会自动下一步", web_app.HTML)
         self.assertNotIn("/下棋|五子棋|来一盘|开一局|对弈|棋局/.test(text)", web_app.HTML)
+        self.assertIn('id="game-size-select"', web_app.HTML)
+        self.assertIn("13x13 标准", web_app.HTML)
 
     def test_game_panel_has_no_new_game_button(self):
         self.assertNotIn("game-new", web_app.HTML)
@@ -46,6 +48,13 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("function syncComposerState()", web_app.HTML)
         self.assertIn("function isGamePlaying()", web_app.HTML)
         self.assertIn("棋局进行中，结束后可继续对话", web_app.HTML)
+
+    def test_game_panel_supports_dynamic_board_size_and_ai_profile(self):
+        self.assertIn("function getSelectedGameSize()", web_app.HTML)
+        self.assertIn("function getAiProfile(state)", web_app.HTML)
+        self.assertIn("game-size-badge", web_app.HTML)
+        self.assertIn('const data = await callGameApi("/api/game/create", {game: "gomoku", size});', web_app.HTML)
+        self.assertIn("const cellSize = board.length >= 19 ? 24 : board.length >= 15 ? 28 : board.length >= 13 ? 32 : 36;", web_app.HTML)
 
     def test_game_ai_move_api_returns_draw_for_full_board(self):
         GAMES.clear()

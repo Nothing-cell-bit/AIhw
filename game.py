@@ -10,6 +10,9 @@ EMPTY = 0
 HUMAN = 1
 AI = 2
 
+SUPPORTED_BOARD_SIZES = (9, 13, 15, 19)
+DEFAULT_BOARD_SIZE = 9
+
 STATUS_PLAYING = "playing"
 STATUS_FINISHED = "finished"
 STATUS_DRAW = "draw"
@@ -51,10 +54,11 @@ class GameState:
     updated_at: float
 
 
-def new_game(size: int = 9, human: int = HUMAN, ai: int = AI) -> GameState:
+def new_game(size: int = DEFAULT_BOARD_SIZE, human: int = HUMAN, ai: int = AI) -> GameState:
     size = int(size)
-    if size < 5 or size > 15:
-        raise GameError("棋盘大小必须在 5 到 15 之间。")
+    if size not in SUPPORTED_BOARD_SIZES:
+        allowed = " / ".join(f"{item}x{item}" for item in SUPPORTED_BOARD_SIZES)
+        raise GameError(f"当前只支持以下棋盘规格：{allowed}。")
     if human == ai or {human, ai} - {HUMAN, AI}:
         raise GameError("玩家和 AI 棋子只能分别使用 1 和 2。")
 
@@ -237,7 +241,12 @@ def serialize_move(move: Move) -> dict[str, Any]:
 
 
 def coord_label(row: int, col: int) -> str:
-    return f"{chr(ord('A') + int(col))}{int(row) + 1}"
+    return f"{_column_label(int(col))}{int(row) + 1}"
+
+
+def board_size_label(size: int) -> str:
+    size = int(size)
+    return f"{size}x{size}"
 
 
 def result_label(state: GameState) -> str:
@@ -271,3 +280,19 @@ def _count_direction(
         row += dr
         col += dc
     return count
+
+
+def _column_label(col: int) -> str:
+    col = int(col)
+    if col < 0:
+        raise ValueError("col must be non-negative")
+
+    label = ""
+    value = col
+    while True:
+        value, remainder = divmod(value, 26)
+        label = chr(ord("A") + remainder) + label
+        if value == 0:
+            break
+        value -= 1
+    return label

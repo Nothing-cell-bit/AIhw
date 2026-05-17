@@ -5,10 +5,12 @@ from typing import Any, Optional, Tuple, Union
 
 from game import (
     AI,
+    DEFAULT_BOARD_SIZE,
     HUMAN,
     EMPTY,
     STATUS_DRAW,
     STATUS_PLAYING,
+    board_size_label,
     GameError,
     apply_move,
     coord_label,
@@ -21,17 +23,24 @@ from game import (
     serialize_state,
     store_game,
 )
-from game_ai import choose_ai_move, evaluate_board
+from game_ai import choose_ai_move, evaluate_board, get_search_profile
 
 
-def game_create(game: str = "gomoku", size: int = 9, human: Union[str, int] = "B", ai: Union[str, int] = "W") -> str:
+def game_create(
+    game: str = "gomoku",
+    size: int = DEFAULT_BOARD_SIZE,
+    human: Union[str, int] = "B",
+    ai: Union[str, int] = "W",
+) -> str:
     if game != "gomoku":
         raise GameError("首版只支持 gomoku 五子棋。")
     human_player = _piece_to_int(human, HUMAN)
     ai_player = _piece_to_int(ai, AI)
     state = store_game(new_game(size=size, human=human_player, ai=ai_player))
     payload = serialize_state(state)
-    payload["message"] = "五子棋已开始，玩家执黑先手。"
+    payload["board_label"] = board_size_label(state.size)
+    payload["ai_profile"] = _profile_payload(state.size)
+    payload["message"] = f"{board_size_label(state.size)} 五子棋已开始，玩家执黑先手。"
     return _json(payload)
 
 
@@ -42,6 +51,8 @@ def game_player_move(game_id: Optional[str] = None, row: int = 0, col: int = 0) 
 
     apply_move(state, row, col, state.human)
     payload = serialize_state(state)
+    payload["board_label"] = board_size_label(state.size)
+    payload["ai_profile"] = _profile_payload(state.size)
     if state.status == STATUS_PLAYING:
         payload["message"] = f"玩家落子在 {coord_label(row, col)}，现在轮到 AI。"
     else:
@@ -49,17 +60,24 @@ def game_player_move(game_id: Optional[str] = None, row: int = 0, col: int = 0) 
     return _json(payload)
 
 
-def game_ai_move(game_id: Optional[str] = None, time_limit_ms: int = 5000, max_depth: int = 5) -> str:
+def game_ai_move(
+    game_id: Optional[str] = None,
+    time_limit_ms: Optional[int] = None,
+    max_depth: Optional[int] = None,
+) -> str:
     state = get_game(game_id)
     if state.status != STATUS_PLAYING:
         raise GameError("棋局已经结束。")
     if state.turn != state.ai:
         raise GameError("当前不是 AI 回合。")
+    profile = get_search_profile(state.size)
     if is_full(state.board):
         state.status = STATUS_DRAW
         state.winner = EMPTY
         state.turn = EMPTY
         payload = serialize_state(state)
+        payload["board_label"] = board_size_label(state.size)
+        payload["ai_profile"] = _profile_payload(state.size)
         payload["message"] = "棋盘已满，本局平局。"
         return _json(payload)
 
@@ -67,8 +85,8 @@ def game_ai_move(game_id: Optional[str] = None, time_limit_ms: int = 5000, max_d
         state.board,
         ai_player=state.ai,
         human_player=state.human,
-        time_limit_ms=time_limit_ms,
-        max_depth=max_depth,
+        time_limit_ms=time_limit_ms if time_limit_ms is not None else profile.time_limit_ms,
+        max_depth=max_depth if max_depth is not None else profile.max_depth,
     )
     row, col = result.move
     if state.board[row][col] != EMPTY:
@@ -78,6 +96,8 @@ def game_ai_move(game_id: Optional[str] = None, time_limit_ms: int = 5000, max_d
             state.winner = EMPTY
             state.turn = EMPTY
             payload = serialize_state(state)
+            payload["board_label"] = board_size_label(state.size)
+            payload["ai_profile"] = _profile_payload(state.size)
             payload["message"] = "棋盘已满，本局平局。"
             return _json(payload)
         row, col = fallback
@@ -99,6 +119,8 @@ def game_ai_move(game_id: Optional[str] = None, time_limit_ms: int = 5000, max_d
             "nodes": result.nodes,
             "score": result.score,
             "elapsed_ms": result.elapsed_ms,
+            "board_label": board_size_label(state.size),
+            "ai_profile": _profile_payload(state.size),
         }
     )
     if state.status == STATUS_PLAYING:
@@ -110,6 +132,7 @@ def game_ai_move(game_id: Optional[str] = None, time_limit_ms: int = 5000, max_d
 
 def game_analyze(game_id: Optional[str] = None) -> str:
     state = get_game(game_id)
+    profile = get_search_profile(state.size)
     ai_moves = [move for move in state.moves if move.player == state.ai]
     human_moves = [move for move in state.moves if move.player == state.human]
     metrics = {
@@ -117,11 +140,16 @@ def game_analyze(game_id: Optional[str] = None) -> str:
         "max_depth": max((move.depth_reached or 0 for move in ai_moves), default=0),
         "average_ai_elapsed_ms": _average([move.elapsed_ms for move in ai_moves if move.elapsed_ms is not None]),
         "current_score": evaluate_board(state.board, state.ai, state.human),
+        "recommended_time_limit_ms": profile.time_limit_ms,
+        "recommended_max_depth": profile.max_depth,
+        "candidate_limit": profile.candidate_limit,
     }
     key_moves = _key_moves(state)
     summary = _summary(state, metrics, key_moves)
     payload = {
         "game_id": state.game_id,
+        "size": state.size,
+        "board_label": board_size_label(state.size),
         "result": result_label(state),
         "summary": summary,
         "key_moves": key_moves,
@@ -144,6 +172,8 @@ def game_resign(game_id: Optional[str] = None) -> str:
     state = get_game(game_id)
     resign_game(state)
     payload = serialize_state(state)
+    payload["board_label"] = board_size_label(state.size)
+    payload["ai_profile"] = _profile_payload(state.size)
     payload["message"] = "玩家已提前退出，本局记为 AI 胜。"
     return _json(payload)
 
@@ -161,7 +191,7 @@ def _piece_to_int(piece: Union[str, int], default: int) -> int:
 
 def _summary(state, metrics: dict[str, Any], key_moves: list[dict[str, Any]]) -> str:
     if not state.moves:
-        return "本局尚未落子，可以从棋盘中心附近开始争夺先手。"
+        return f"{board_size_label(state.size)} 棋盘尚未落子，可以从棋盘中心附近开始争夺先手。"
 
     result = result_label(state)
     if state.status == STATUS_PLAYING:
@@ -176,7 +206,7 @@ def _summary(state, metrics: dict[str, Any], key_moves: list[dict[str, Any]]) ->
 
     depth = metrics["max_depth"]
     elapsed = metrics["average_ai_elapsed_ms"]
-    return f"{lead}{detail}AI 最高搜索到 {depth} 层，平均每步耗时 {elapsed} 毫秒。"
+    return f"{board_size_label(state.size)} 棋盘下，{lead}{detail}AI 最高搜索到 {depth} 层，平均每步耗时 {elapsed} 毫秒。"
 
 
 def _key_moves(state) -> list[dict[str, Any]]:
@@ -227,3 +257,13 @@ def _first_empty(board: list[list[int]]) -> Optional[Tuple[int, int]]:
 
 def _json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _profile_payload(size: int) -> dict[str, int]:
+    profile = get_search_profile(size)
+    return {
+        "time_limit_ms": profile.time_limit_ms,
+        "max_depth": profile.max_depth,
+        "candidate_limit": profile.candidate_limit,
+        "candidate_radius": profile.candidate_radius,
+    }

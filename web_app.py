@@ -152,6 +152,25 @@ HTML = r"""<!doctype html>
       background: var(--tool);
       font-size: 13px;
     }
+    .size-picker {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+      margin-bottom: 14px;
+    }
+    .size-picker label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .size-picker select {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 10px;
+      font-size: 13px;
+    }
     .new-chat {
       width: 100%;
       height: 38px;
@@ -390,8 +409,25 @@ HTML = r"""<!doctype html>
       font-weight: 800;
       font-size: 15px;
     }
+    .game-meta {
+      margin-top: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .game-size-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+      font-size: 12px;
+      font-weight: 700;
+    }
     .game-status {
-      margin-top: 4px;
       color: var(--muted);
       font-size: 13px;
       line-height: 1.45;
@@ -581,6 +617,15 @@ HTML = r"""<!doctype html>
       <div class="tool">game_create</div>
       <div class="tool">game_ai_move</div>
       <div class="tool">game_analyze</div>
+      <div class="size-picker">
+        <label for="game-size-select">默认棋盘规格</label>
+        <select id="game-size-select">
+          <option value="9">9x9 快速</option>
+          <option value="13" selected>13x13 标准</option>
+          <option value="15">15x15 专业</option>
+          <option value="19">19x19 实验</option>
+        </select>
+      </div>
       <h2>记忆状态</h2>
       <div class="memory-box">
         <div class="memory-row"><span>消息数</span><strong id="memory-count">-</strong></div>
@@ -619,9 +664,11 @@ HTML = r"""<!doctype html>
     const memoryCount = document.querySelector("#memory-count");
     const memoryChars = document.querySelector("#memory-chars");
     const memorySummary = document.querySelector("#memory-summary");
+    const gameSizeSelect = document.querySelector("#game-size-select");
     let gamePanel = null;
     let gameBoard = null;
     let gameStatus = null;
+    let gameSizeBadge = null;
     let gameMessage = null;
     let gameSearch = null;
     let gameAnalysis = null;
@@ -770,7 +817,10 @@ HTML = r"""<!doctype html>
           <div class="game-head">
             <div>
               <div class="game-title">五子棋对弈</div>
-              <div class="game-status">创建棋局后开始。</div>
+              <div class="game-meta">
+                <span class="game-size-badge">未创建</span>
+                <div class="game-status">创建棋局后开始。</div>
+              </div>
             </div>
             <div class="game-actions">
               <button type="button" class="game-ai">AI 下棋</button>
@@ -793,6 +843,7 @@ HTML = r"""<!doctype html>
       gamePanel = null;
       gameBoard = null;
       gameStatus = null;
+      gameSizeBadge = null;
       gameMessage = null;
       gameSearch = null;
       gameAnalysis = null;
@@ -880,6 +931,7 @@ HTML = r"""<!doctype html>
       }
       gameBoard = gamePanel.querySelector(".board");
       gameStatus = gamePanel.querySelector(".game-status");
+      gameSizeBadge = gamePanel.querySelector(".game-size-badge");
       gameMessage = gamePanel.querySelector(".game-message");
       gameSearch = gamePanel.querySelector(".search-box");
       gameAnalysis = gamePanel.querySelector(".analysis-box");
@@ -928,9 +980,14 @@ HTML = r"""<!doctype html>
     function renderBoard() {
       if (!gameBoard) return;
       gameBoard.innerHTML = "";
-      const board = gameState?.board || Array.from({length: 9}, () => Array(9).fill(0));
+      const size = gameState?.size || getSelectedGameSize();
+      const board = gameState?.board || Array.from({length: size}, () => Array(size).fill(0));
       const canPlay = gameState && gameState.status === "playing" && gameState.turn === gameState.human && !isGameBusy;
+      const cellSize = board.length >= 19 ? 24 : board.length >= 15 ? 28 : board.length >= 13 ? 32 : 36;
       gameBoard.style.gridTemplateColumns = `repeat(${board.length}, 1fr)`;
+      gameBoard.style.width = `min(100%, ${board.length * cellSize}px)`;
+      gameBoard.style.maxWidth = `${board.length * cellSize}px`;
+      gameBoard.dataset.size = String(board.length);
       for (let row = 0; row < board.length; row += 1) {
         for (let col = 0; col < board[row].length; col += 1) {
           const cell = document.createElement("button");
@@ -952,10 +1009,15 @@ HTML = r"""<!doctype html>
 
     function updateGameInfo(data) {
       if (!gameStatus || !gameMessage || !gameSearch) return;
+      if (gameSizeBadge) {
+        gameSizeBadge.textContent = data.board_label || `${data.size}x${data.size}`;
+      }
       gameStatus.textContent = statusText(data);
       gameMessage.textContent = data.message || "玩家执黑先手，点击棋盘空位落子。";
       if (data.move) {
         gameSearch.textContent = `AI 搜索到 ${data.depth_reached || 0} 层，检查 ${data.nodes || 0} 个节点，耗时 ${data.elapsed_ms || 0} 毫秒，评分 ${data.score || 0}。`;
+      } else if (data.ai_profile) {
+        gameSearch.textContent = `${data.board_label || `${data.size}x${data.size}`} 建议参数：最大深度 ${data.ai_profile.max_depth}，时间预算 ${data.ai_profile.time_limit_ms} 毫秒。`;
       }
       if (["finished", "draw", "resigned"].includes(data.status)) {
         analyzeGame(data.game_id, gamePanel);
@@ -1015,6 +1077,7 @@ HTML = r"""<!doctype html>
 
     async function createGame() {
       const requestToken = ++gameRequestToken;
+      const size = getSelectedGameSize();
       isGameBusy = true;
       freezeCurrentGamePanel();
       gameState = null;
@@ -1022,10 +1085,10 @@ HTML = r"""<!doctype html>
         activeGameStates[currentConversationId] = null;
       }
       appendGamePanel();
-      gameMessage.textContent = "正在创建棋局...";
+      gameMessage.textContent = `正在创建 ${size}x${size} 棋局...`;
       syncGameButtons();
       try {
-        const data = await callGameApi("/api/game/create", {game: "gomoku", size: 9});
+        const data = await callGameApi("/api/game/create", {game: "gomoku", size});
         if (requestToken !== gameRequestToken) return;
         gameState = null;
         gameSearch.textContent = "AI 搜索信息会显示在这里。";
@@ -1076,14 +1139,15 @@ HTML = r"""<!doctype html>
       if (gameState.status !== "playing" || gameState.turn !== gameState.ai) return;
       const requestToken = options.requestToken ?? gameRequestToken;
       const gameId = options.gameId || gameState.game_id;
+      const aiProfile = getAiProfile(gameState);
       if (!keepBusy) {
         isGameBusy = true;
       }
       gameMessage.textContent = "AI 正在搜索下一步...";
-      gameSearch.textContent = "Minimax + Alpha-Beta 迭代加深搜索中...";
+      gameSearch.textContent = `${gameState.board_label || `${gameState.size}x${gameState.size}`} 棋盘下，AI 正在按推荐策略搜索下一步...`;
       renderBoard();
       try {
-        const data = await callGameApi("/api/game/ai_move", {game_id: gameId, time_limit_ms: 1200, max_depth: 4});
+        const data = await callGameApi("/api/game/ai_move", {game_id: gameId, time_limit_ms: aiProfile.time_limit_ms, max_depth: aiProfile.max_depth});
         if (requestToken !== gameRequestToken || data.game_id !== gameId) return;
         applyGameState(data);
       } catch (error) {
@@ -1201,7 +1265,8 @@ HTML = r"""<!doctype html>
         return input.filename ? "读取文件：" + input.filename : "";
       }
       if (step.action === "game_create") {
-        return "创建 9x9 五子棋";
+        const size = Number(input.size) || 9;
+        return `创建 ${size}x${size} 五子棋`;
       }
       if (step.action === "game_player_move") {
         return `玩家落子：${Number(input.row) + 1} 行 ${Number(input.col) + 1} 列`;
@@ -1318,6 +1383,20 @@ HTML = r"""<!doctype html>
     function isGameIntent(text) {
       if (isGameKnowledgeQuery(text)) return false;
       return /想下棋|想玩五子棋|来一盘|开一局|开始下棋|开始五子棋|和AI下棋|和 AI 下棋|和AI对弈|和 AI 对弈|对弈一局|创建棋局/.test(text);
+    }
+
+    function getSelectedGameSize() {
+      const value = Number(gameSizeSelect?.value || 13);
+      return [9, 13, 15, 19].includes(value) ? value : 13;
+    }
+
+    function getAiProfile(state) {
+      if (state?.ai_profile) return state.ai_profile;
+      const size = Number(state?.size || getSelectedGameSize());
+      if (size === 19) return {time_limit_ms: 3000, max_depth: 3};
+      if (size === 15) return {time_limit_ms: 2500, max_depth: 4};
+      if (size === 13) return {time_limit_ms: 1800, max_depth: 4};
+      return {time_limit_ms: 1200, max_depth: 5};
     }
 
     form.addEventListener("submit", async (event) => {
