@@ -55,6 +55,8 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("game-size-badge", web_app.HTML)
         self.assertIn('const data = await callGameApi("/api/game/create", {game: "gomoku", size});', web_app.HTML)
         self.assertIn("const cellSize = board.length >= 19 ? 24 : board.length >= 15 ? 28 : board.length >= 13 ? 32 : 36;", web_app.HTML)
+        self.assertIn("chatPayload.current_game_id = gameState.game_id;", web_app.HTML)
+        self.assertIn('if (step.action === "game_moves") {', web_app.HTML)
 
     def test_game_ai_move_api_returns_draw_for_full_board(self):
         GAMES.clear()
@@ -213,6 +215,63 @@ class WebAppTests(unittest.TestCase):
 
             self.assertLess(elapsed, 0.3)
             self.assertEqual(json.loads(first_line)["type"], "answer_delta")
+        finally:
+            server.shutdown()
+            server.server_close()
+            web_app.get_agent = original_agent_factory
+
+    def test_chat_stream_passes_current_game_context_to_agent(self):
+        original_agent_factory = web_app.get_agent
+        captured = {}
+
+        class ContextAwareAgent:
+            memory = type(
+                "Memory",
+                (),
+                {
+                    "stats": staticmethod(
+                        lambda: {
+                            "message_count": 1,
+                            "max_messages": 16,
+                            "estimated_chars": 0,
+                            "max_chars": 12000,
+                            "summary_chars": 0,
+                        }
+                    )
+                },
+            )()
+
+            def run_events(self, message):
+                captured["message"] = message
+                yield {"type": "done", "result": AgentResult(final_answer="ok", steps=[])}
+
+        web_app.get_agent = lambda conversation: ContextAwareAgent()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web_app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            body = json.dumps(
+                {
+                    "message": "列出本局的序列",
+                    "conversation_id": web_app.DEFAULT_CONVERSATION_ID,
+                    "current_game_id": "game-123",
+                    "current_game_size": 15,
+                    "current_game_status": "draw",
+                }
+            ).encode("utf-8")
+            req = request.Request(
+                f"http://127.0.0.1:{server.server_address[1]}/api/chat_stream",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with request.urlopen(req, timeout=10) as response:
+                response.read()
+
+            self.assertIn("[当前棋局上下文]", captured["message"])
+            self.assertIn("game_id=game-123", captured["message"])
+            self.assertIn("size=15", captured["message"])
+            self.assertIn("status=draw", captured["message"])
         finally:
             server.shutdown()
             server.server_close()

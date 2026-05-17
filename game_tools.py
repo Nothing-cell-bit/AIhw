@@ -168,6 +168,37 @@ def game_analyze(game_id: Optional[str] = None) -> str:
     return _json(payload)
 
 
+def game_moves(game_id: Optional[str] = None) -> str:
+    state = get_game(game_id)
+    sequence = [
+        {
+            "move_no": move.move_no,
+            "player": player_label(move.player),
+            "coord": coord_label(move.row, move.col),
+            "row": move.row,
+            "col": move.col,
+        }
+        for move in state.moves
+    ]
+    payload = {
+        "game_id": state.game_id,
+        "size": state.size,
+        "board_label": board_size_label(state.size),
+        "status": state.status,
+        "result": result_label(state),
+        "total_moves": len(state.moves),
+        "moves": sequence,
+        "sequence_text": "；".join(
+            f"{item['move_no']}. {item['player']} {item['coord']}" for item in sequence
+        ),
+    }
+    if not sequence:
+        payload["message"] = "当前棋局还没有任何落子。"
+    else:
+        payload["message"] = f"已列出 {board_size_label(state.size)} 棋局的全部 {len(sequence)} 手。"
+    return _json(payload)
+
+
 def game_resign(game_id: Optional[str] = None) -> str:
     state = get_game(game_id)
     resign_game(state)

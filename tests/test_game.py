@@ -3,7 +3,7 @@ import unittest
 
 from game import GAMES, AI, HUMAN, STATUS_PLAYING, GameError, apply_move, check_winner, coord_label, new_game, store_game
 from game_ai import choose_ai_move, get_search_profile
-from game_tools import game_ai_move, game_analyze, game_create, game_player_move
+from game_tools import game_ai_move, game_analyze, game_create, game_moves, game_player_move
 
 
 class GomokuGameTests(unittest.TestCase):
@@ -45,6 +45,26 @@ class GomokuGameTests(unittest.TestCase):
         result = choose_ai_move(state.board, time_limit_ms=1000, max_depth=3)
         self.assertEqual(result.move, (3, 4))
 
+    def test_ai_blocks_opponent_open_four_setup(self):
+        state = new_game()
+        state.turn = state.ai
+        state.board[4][2] = state.human
+        state.board[4][4] = state.human
+        state.board[4][5] = state.human
+        result = choose_ai_move(state.board, time_limit_ms=1200, max_depth=3)
+        self.assertEqual(result.move, (4, 3))
+
+    def test_ai_prefers_forcing_open_four_attack(self):
+        state = new_game()
+        state.turn = state.ai
+        state.board[4][2] = state.ai
+        state.board[4][3] = state.ai
+        state.board[4][5] = state.ai
+        state.board[3][4] = state.human
+        state.board[5][4] = state.human
+        result = choose_ai_move(state.board, time_limit_ms=1200, max_depth=3)
+        self.assertEqual(result.move, (4, 4))
+
     def test_tool_flow_and_analysis(self):
         created = json.loads(game_create(size=13))
         self.assertEqual(created["size"], 13)
@@ -61,6 +81,15 @@ class GomokuGameTests(unittest.TestCase):
         self.assertEqual(analysis["metrics"]["total_moves"], 2)
         self.assertIn("summary", analysis)
         self.assertEqual(analysis["size"], 13)
+
+    def test_game_moves_returns_sequence_for_finished_or_current_game(self):
+        created = json.loads(game_create(size=15))
+        game_player_move(created["game_id"], 7, 7)
+        sequence = json.loads(game_moves(created["game_id"]))
+        self.assertEqual(sequence["size"], 15)
+        self.assertEqual(sequence["total_moves"], 1)
+        self.assertEqual(sequence["moves"][0]["coord"], "H8")
+        self.assertIn("1. 玩家黑棋 H8", sequence["sequence_text"])
 
     def test_ai_cannot_move_twice_before_player_moves_again(self):
         created = json.loads(game_create())

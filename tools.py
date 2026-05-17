@@ -7,7 +7,7 @@ from typing import Any, Dict
 from urllib import error, parse, request
 
 from game import GameError
-from game_tools import game_ai_move, game_analyze, game_create, game_player_move, game_resign
+from game_tools import game_ai_move, game_analyze, game_create, game_moves, game_player_move, game_resign
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -143,6 +143,7 @@ TOOLS = {
     "game_player_move": game_player_move,
     "game_ai_move": game_ai_move,
     "game_analyze": game_analyze,
+    "game_moves": game_moves,
     "game_resign": game_resign,
 }
 

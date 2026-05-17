@@ -88,6 +88,25 @@ def title_from_message(message):
     return message[:18] + ("..." if len(message) > 18 else "")
 
 
+def build_agent_message(message, payload):
+    current_game_id = str(payload.get("current_game_id", "")).strip()
+    if not current_game_id:
+        return message
+
+    parts = [message, "", "[当前棋局上下文]"]
+    parts.append(f"game_id={current_game_id}")
+
+    current_game_size = payload.get("current_game_size")
+    if current_game_size:
+        parts.append(f"size={current_game_size}")
+
+    current_game_status = str(payload.get("current_game_status", "")).strip()
+    if current_game_status:
+        parts.append(f"status={current_game_status}")
+
+    return "\n".join(parts)
+
+
 HTML = r"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -1277,6 +1296,9 @@ HTML = r"""<!doctype html>
       if (step.action === "game_analyze") {
         return "复盘当前棋局";
       }
+      if (step.action === "game_moves") {
+        return "列出当前棋局手顺";
+      }
       if (step.action === "game_resign") {
         return "提前结束棋局";
       }
@@ -1360,6 +1382,7 @@ HTML = r"""<!doctype html>
         game_player_move: "玩家落子",
         game_ai_move: "AI 下棋",
         game_analyze: "棋局复盘",
+        game_moves: "棋谱序列",
         game_resign: "提前退出"
       };
       return names[name] || name || "未知工具";
@@ -1446,10 +1469,16 @@ HTML = r"""<!doctype html>
       waiting.appendChild(loading);
 
       try {
+        const chatPayload = {message: text, conversation_id: currentConversationId};
+        if (gameState?.game_id) {
+          chatPayload.current_game_id = gameState.game_id;
+          chatPayload.current_game_size = gameState.size;
+          chatPayload.current_game_status = gameState.status;
+        }
         const response = await fetch("/api/chat_stream", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({message: text, conversation_id: currentConversationId})
+          body: JSON.stringify(chatPayload)
         });
         if (!response.ok || !response.body) {
           const data = await response.json();
@@ -1604,7 +1633,7 @@ class Handler(BaseHTTPRequestHandler):
                 conversation["title"] = title_from_message(message)
             conversation["updated_at"] = time.time()
             agent = get_agent(conversation)
-            result = agent.run(message)
+            result = agent.run(build_agent_message(message, payload))
             step_payloads = [
                 {
                     "index": step.index,
@@ -1686,7 +1715,7 @@ class Handler(BaseHTTPRequestHandler):
             headers_sent = True
             self._use_chunked_stream = True
 
-            for event in agent.run_events(message):
+            for event in agent.run_events(build_agent_message(message, payload)):
                 if event["type"] == "done":
                     result = event["result"]
                     conversation["updated_at"] = time.time()

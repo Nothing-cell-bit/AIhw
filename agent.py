@@ -297,6 +297,7 @@ class MiniReActAgent:
             "game_player_move": "玩家落子",
             "game_ai_move": "AI 下棋",
             "game_analyze": "棋局复盘",
+            "game_moves": "棋谱序列",
             "game_resign": "提前退出棋局",
         }
         return labels.get(action, action)
@@ -323,6 +324,8 @@ class MiniReActAgent:
             return f"为棋局 {game_id or '当前棋局'} 搜索下一步"
         if action == "game_analyze":
             return "分析当前棋局"
+        if action == "game_moves":
+            return "列出当前棋局的落子序列"
         if action == "game_resign":
             return "结束当前棋局"
         return ""
