@@ -10,7 +10,7 @@ from game import GameError
 from game_tools import game_ai_move, game_analyze, game_create, game_player_move, game_resign
 
 
-HOST = "127.0.0.1"
+HOST = os.getenv("AIHW_HOST", "0.0.0.0").strip() or "0.0.0.0"
 PORT = int(os.getenv("AIHW_PORT", "8501"))
 
 
@@ -30,10 +30,24 @@ DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION = create_conversation("新对话")
 CONVERSATIONS = {DEFAULT_CONVERSATION_ID: DEFAULT_CONVERSATION}
 
 
+def fallback_conversation():
+    if DEFAULT_CONVERSATION_ID in CONVERSATIONS:
+        return CONVERSATIONS[DEFAULT_CONVERSATION_ID]
+    if CONVERSATIONS:
+        return sorted(
+            CONVERSATIONS.values(),
+            key=lambda item: item["updated_at"],
+            reverse=True,
+        )[0]
+    conversation_id, conversation = create_conversation("新对话")
+    CONVERSATIONS[conversation_id] = conversation
+    return conversation
+
+
 def get_conversation(conversation_id):
     if conversation_id in CONVERSATIONS:
         return CONVERSATIONS[conversation_id]
-    return CONVERSATIONS[DEFAULT_CONVERSATION_ID]
+    return fallback_conversation()
 
 
 def conversation_payload(conversation):
@@ -73,12 +87,24 @@ def ui_payload(conversation):
 
 
 def list_conversations():
+    if not CONVERSATIONS:
+        fallback_conversation()
     conversations = sorted(
         CONVERSATIONS.values(),
         key=lambda item: item["updated_at"],
         reverse=True,
     )
     return [conversation_payload(item) for item in conversations]
+
+
+def delete_conversation(conversation_id):
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        raise ValueError("conversation_id 不能为空")
+    if conversation_id not in CONVERSATIONS:
+        raise KeyError("会话不存在")
+    del CONVERSATIONS[conversation_id]
+    return fallback_conversation()
 
 
 def title_from_message(message):
@@ -115,102 +141,161 @@ HTML = r"""<!doctype html>
   <title>Mini ReAct Agent</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f3f5f8;
-      --panel: #ffffff;
-      --panel-soft: #f8fafc;
-      --line: #d8dee8;
-      --text: #152033;
-      --muted: #667085;
-      --accent: #2563eb;
-      --accent-dark: #1d4ed8;
-      --green: #0f766e;
-      --orange: #b45309;
-      --tool: #eef8f5;
-      --shadow: 0 18px 45px rgba(21, 32, 51, .08);
+      color-scheme: dark;
+      --bg: #060914;
+      --bg-deep: #030611;
+      --panel: rgba(10, 18, 36, 0.84);
+      --panel-strong: rgba(11, 21, 44, 0.94);
+      --panel-soft: rgba(18, 30, 58, 0.82);
+      --line: rgba(90, 219, 255, 0.18);
+      --line-strong: rgba(136, 96, 255, 0.34);
+      --text: #edf6ff;
+      --muted: #94a9d7;
+      --accent: #46d7ff;
+      --accent-dark: #1dbbff;
+      --accent-soft: rgba(70, 215, 255, 0.14);
+      --violet: #8b5cff;
+      --green: #27f0b4;
+      --orange: #ff9a3d;
+      --tool: rgba(17, 28, 55, 0.75);
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
+      --shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.28);
+      --glow: 0 0 0 1px rgba(70, 215, 255, 0.12), 0 0 22px rgba(70, 215, 255, 0.18);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        linear-gradient(180deg, #f9fbff 0%, var(--bg) 42%, #eef2f7 100%);
+        radial-gradient(circle at top left, rgba(70, 215, 255, 0.16), transparent 26%),
+        radial-gradient(circle at top right, rgba(139, 92, 255, 0.18), transparent 24%),
+        radial-gradient(circle at 50% 120%, rgba(39, 240, 180, 0.12), transparent 28%),
+        linear-gradient(180deg, #0b1120 0%, #060914 45%, #030611 100%);
       color: var(--text);
+      position: relative;
+      overflow: hidden;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.02)) 0 0 / 100% 3px,
+        linear-gradient(90deg, rgba(70, 215, 255, 0.03) 1px, transparent 1px) 0 0 / 32px 32px,
+        linear-gradient(rgba(139, 92, 255, 0.02) 1px, transparent 1px) 0 0 / 32px 32px;
+      mix-blend-mode: screen;
     }
     .layout {
       display: grid;
-      grid-template-columns: 260px minmax(0, 1fr);
+      grid-template-columns: 280px minmax(0, 1fr);
       min-height: 100vh;
     }
     aside {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
       border-right: 1px solid var(--line);
-      background: rgba(255, 255, 255, .78);
-      backdrop-filter: blur(12px);
-      padding: 22px;
+      background: rgba(6, 11, 25, 0.74);
+      backdrop-filter: blur(24px);
+      padding: 24px 18px;
+    }
+    .rail-top {
+      display: grid;
+      gap: 12px;
+    }
+    .brand-card, .rail-card {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow-soft), var(--glow);
+    }
+    .rail-card {
+      padding: 16px;
+      min-height: 0;
+    }
+    .brand-card {
+      padding: 18px 18px 16px;
     }
     aside h1 {
-      font-size: 20px;
-      margin: 0 0 6px;
+      font-size: 19px;
+      margin: 0 0 8px;
+      letter-spacing: -.02em;
     }
     .subtitle {
       color: var(--muted);
       font-size: 13px;
-      line-height: 1.55;
-      margin-bottom: 22px;
+      line-height: 1.6;
+      margin: 0;
+    }
+    .section-label {
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin: 0 0 10px;
     }
     aside h2 {
-      font-size: 13px;
-      margin: 22px 0 10px;
+      font-size: 11px;
+      margin: 0 0 10px;
       color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
     }
     .tool {
       padding: 9px 11px;
       margin-bottom: 8px;
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 12px;
       background: var(--tool);
       font-size: 13px;
     }
     .size-picker {
       display: grid;
       gap: 6px;
-      margin-top: 10px;
-      margin-bottom: 14px;
     }
     .size-picker label {
       font-size: 12px;
       color: var(--muted);
     }
     .size-picker select {
-      height: 36px;
+      height: 42px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
+      border-radius: 14px;
+      background: rgba(8, 16, 33, 0.92);
       color: var(--text);
-      padding: 0 10px;
+      padding: 0 12px;
       font-size: 13px;
     }
     .new-chat {
       width: 100%;
-      height: 38px;
-      margin: 14px 0 8px;
-      border-radius: 7px;
-      background: var(--accent);
+      height: 44px;
+      margin: 0;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #1cc8ff, #5d7bff 54%, #8b5cff);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 26px rgba(70, 215, 255, 0.28);
     }
     .conversation-list {
       display: grid;
       gap: 7px;
-      max-height: 260px;
+      max-height: 100%;
       overflow-y: auto;
       padding-right: 2px;
     }
+    .conversation-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 36px;
+      gap: 8px;
+      align-items: stretch;
+    }
     .conversation-item {
       width: 100%;
-      min-height: 38px;
-      padding: 8px 10px;
+      min-height: 42px;
+      padding: 10px 12px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
+      border-radius: 14px;
+      background: rgba(12, 19, 39, 0.86);
       color: var(--text);
       text-align: left;
       font-size: 13px;
@@ -218,33 +303,40 @@ HTML = r"""<!doctype html>
       cursor: pointer;
     }
     .conversation-item:hover {
-      border-color: #bfdbfe;
-      background: #f8fbff;
+      border-color: rgba(70, 215, 255, 0.34);
+      background: rgba(70, 215, 255, 0.12);
     }
     .conversation-item.active {
-      border-color: #93c5fd;
-      background: #eff6ff;
-      color: #1d4ed8;
+      border-color: rgba(139, 92, 255, 0.42);
+      background: linear-gradient(135deg, rgba(70, 215, 255, 0.14), rgba(139, 92, 255, 0.16));
+      color: #dff5ff;
       font-weight: 700;
     }
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 11px;
-      border: 1px solid #c7d2fe;
-      border-radius: 8px;
-      background: #eef2ff;
-      color: #3730a3;
-      font-size: 13px;
+    .conversation-delete {
+      min-width: 36px;
+      min-height: 42px;
+      padding: 0;
+      border: 1px solid rgba(255, 96, 122, 0.2);
+      border-radius: 12px;
+      background: rgba(44, 15, 24, 0.9);
+      color: #ff9db0;
+      font-size: 18px;
+      line-height: 1;
+      box-shadow: none;
+    }
+    .conversation-delete:hover {
+      background: rgba(255, 96, 122, 0.16);
+      color: #ffd2da;
+      box-shadow: none;
+    }
+    .status, .memory-box {
+      display: none;
     }
     .memory-box {
-      display: grid;
       gap: 8px;
-      padding: 11px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
+      padding: 0;
+      border: 0;
+      background: transparent;
       font-size: 13px;
       color: var(--muted);
     }
@@ -267,30 +359,41 @@ HTML = r"""<!doctype html>
       display: flex;
       flex-direction: column;
       height: 100vh;
+      min-width: 0;
     }
     header {
-      padding: 18px 28px;
-      border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, .86);
-      backdrop-filter: blur(12px);
+      display: flex;
+      justify-content: center;
+      padding: 14px 28px 6px;
+      background: transparent;
+    }
+    .hero {
+      width: min(980px, 100%);
+      padding: 0 4px;
     }
     header h2 {
       margin: 0;
-      font-size: 19px;
+      font-size: 34px;
+      line-height: 1.08;
+      letter-spacing: -.04em;
+      font-weight: 700;
+      text-shadow: 0 0 18px rgba(70, 215, 255, 0.22);
     }
     header p {
-      margin: 6px 0 0;
+      margin: 8px 0 0;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 14px;
+      line-height: 1.55;
+      max-width: 720px;
     }
     .chat {
       flex: 1;
       overflow-y: auto;
-      padding: 26px 28px;
+      padding: 6px 28px 14px;
     }
     .turn {
-      max-width: 860px;
-      margin: 0 auto 16px;
+      max-width: 920px;
+      margin: 0 auto 12px;
       display: flex;
       gap: 12px;
       align-items: flex-start;
@@ -299,59 +402,76 @@ HTML = r"""<!doctype html>
       flex-direction: row-reverse;
     }
     .avatar {
-      flex: 0 0 38px;
-      height: 38px;
+      flex: 0 0 34px;
+      height: 34px;
       display: grid;
       place-items: center;
-      border-radius: 8px;
+      border-radius: 50%;
       color: #fff;
       font-weight: 700;
-      font-size: 13px;
-      background: var(--green);
-      box-shadow: var(--shadow);
+      font-size: 12px;
+      background: linear-gradient(135deg, #19d7ff, #27f0b4);
+      box-shadow: 0 0 18px rgba(39, 240, 180, 0.25);
     }
     .user-turn .avatar {
-      background: var(--accent);
+      background: linear-gradient(135deg, #5d7bff, #8b5cff);
     }
     .bubble {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 2px;
       min-width: 0;
-      max-width: min(720px, 100%);
-      padding: 13px 15px 14px;
+      max-width: min(760px, 100%);
+      padding: 8px 14px 10px;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
-      line-height: 1.65;
-      white-space: pre-wrap;
-      box-shadow: 0 8px 24px rgba(21, 32, 51, .05);
+      border-radius: 20px;
+      background:
+        linear-gradient(135deg, rgba(70, 215, 255, 0.06), rgba(139, 92, 255, 0.06)),
+        var(--panel);
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      backdrop-filter: blur(20px);
     }
     .user-turn .bubble {
-      border-color: #bfdbfe;
-      background: #eff6ff;
+      border-color: rgba(139, 92, 255, 0.26);
+      background:
+        linear-gradient(135deg, rgba(93, 123, 255, 0.16), rgba(139, 92, 255, 0.14)),
+        rgba(18, 26, 52, 0.9);
     }
     .speaker {
       display: block;
-      margin-bottom: 6px;
-      color: var(--muted);
-      font-size: 12px;
+      margin: 0;
+      color: #7cecff;
+      font-size: 14px;
+      line-height: 1.45;
       font-weight: 700;
     }
+    .message-text {
+      display: block;
+      width: 100%;
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
     .thinking-panel {
-      max-width: 860px;
+      max-width: 920px;
       margin: 0 auto 14px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 28px;
       background: var(--panel);
       overflow: hidden;
-      box-shadow: var(--shadow);
+      box-shadow: var(--shadow-soft), var(--glow);
+      backdrop-filter: blur(20px);
     }
     .thinking-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 12px 14px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--line);
-      background: var(--panel-soft);
+      background: linear-gradient(135deg, rgba(70, 215, 255, 0.12), rgba(139, 92, 255, 0.1));
       color: var(--text);
       font-weight: 700;
       font-size: 14px;
@@ -362,18 +482,18 @@ HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .steps {
-      padding: 12px 14px 14px;
+      padding: 12px 16px 14px;
     }
     .step {
       display: grid;
       grid-template-columns: 28px minmax(0, 1fr);
       gap: 10px;
       padding: 10px 0;
-      border-bottom: 1px solid #edf0f5;
+      border-bottom: 1px solid rgba(123, 155, 219, 0.12);
       animation: fadeIn .26s ease-out both;
     }
     .step-live {
-      background: linear-gradient(90deg, rgba(224, 242, 254, 0.28), rgba(255, 255, 255, 0));
+      background: linear-gradient(90deg, rgba(70, 215, 255, 0.12), rgba(255, 255, 255, 0));
     }
     .step:last-child {
       border-bottom: 0;
@@ -384,8 +504,8 @@ HTML = r"""<!doctype html>
       display: grid;
       place-items: center;
       border-radius: 50%;
-      background: #e0f2fe;
-      color: #0369a1;
+      background: linear-gradient(135deg, rgba(70, 215, 255, 0.18), rgba(139, 92, 255, 0.16));
+      color: #8fe8ff;
       font-size: 12px;
       font-weight: 700;
     }
@@ -403,10 +523,10 @@ HTML = r"""<!doctype html>
     }
     .tool-call {
       margin-top: 8px;
-      padding: 9px 10px;
+      padding: 10px 12px;
       border-left: 3px solid var(--orange);
-      border-radius: 6px;
-      background: #fff7ed;
+      border-radius: 14px;
+      background: rgba(39, 20, 3, 0.66);
       font-size: 12px;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
@@ -418,21 +538,24 @@ HTML = r"""<!doctype html>
       background: transparent;
     }
     .game-turn .bubble {
-      max-width: min(860px, 100%);
+      max-width: min(920px, 100%);
+      padding: 6px 10px 10px;
     }
     .game-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 14px;
-      margin-bottom: 12px;
+      margin-bottom: 8px;
     }
     .game-title {
       font-weight: 800;
-      font-size: 15px;
+      font-size: 16px;
+      letter-spacing: .04em;
+      color: #8fe8ff;
     }
     .game-meta {
-      margin-top: 6px;
+      margin-top: 4px;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -441,11 +564,11 @@ HTML = r"""<!doctype html>
     .game-size-badge {
       display: inline-flex;
       align-items: center;
-      padding: 4px 8px;
+      padding: 5px 10px;
       border-radius: 999px;
-      background: #eff6ff;
-      color: #1d4ed8;
-      border: 1px solid #bfdbfe;
+      background: rgba(70, 215, 255, 0.12);
+      color: #8fe8ff;
+      border: 1px solid rgba(70, 215, 255, 0.28);
       font-size: 12px;
       font-weight: 700;
     }
@@ -456,15 +579,15 @@ HTML = r"""<!doctype html>
     }
     .game-actions {
       display: flex;
-      gap: 8px;
+      gap: 10px;
       flex-wrap: wrap;
       justify-content: flex-end;
     }
     .game-actions button {
       width: auto;
-      min-width: 82px;
-      height: 34px;
-      padding: 0 12px;
+      min-width: 96px;
+      min-height: 38px;
+      padding: 0 14px;
       font-size: 13px;
     }
     .game-actions button:disabled {
@@ -475,18 +598,18 @@ HTML = r"""<!doctype html>
     }
     .game-actions .secondary {
       border: 1px solid var(--line);
-      background: #fff;
+      background: rgba(15, 23, 42, 0.82);
       color: var(--text);
     }
     .game-actions .secondary:hover {
-      border-color: #bfdbfe;
-      background: #eff6ff;
-      color: var(--accent-dark);
+      border-color: rgba(70, 215, 255, 0.4);
+      background: rgba(70, 215, 255, 0.12);
+      color: #8fe8ff;
     }
     .game-body {
       display: grid;
       grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
-      gap: 14px;
+      gap: 12px;
       align-items: start;
     }
     .board {
@@ -495,8 +618,10 @@ HTML = r"""<!doctype html>
       width: min(100%, 360px);
       aspect-ratio: 1 / 1;
       border: 2px solid #8b5a2b;
+      border-radius: 10px;
       background: #d9a85f;
-      box-shadow: 0 10px 28px rgba(21, 32, 51, .10);
+      box-shadow: 0 10px 28px rgba(21, 32, 51, 0.18);
+      overflow: hidden;
     }
     .cell {
       position: relative;
@@ -504,15 +629,18 @@ HTML = r"""<!doctype html>
       place-items: center;
       width: 100%;
       aspect-ratio: 1 / 1;
-      border: 1px solid rgba(93, 58, 20, .38);
+      min-height: 24px;
+      border: 1px solid rgba(93, 58, 20, 0.38);
       background: transparent;
       min-width: 0;
       padding: 0;
       color: var(--text);
       cursor: pointer;
+      border-radius: 0;
     }
     .cell:hover:not(:disabled) {
-      background: rgba(255, 255, 255, .18);
+      background: rgba(255, 255, 255, 0.18);
+      box-shadow: none;
     }
     .cell:disabled {
       cursor: default;
@@ -529,7 +657,7 @@ HTML = r"""<!doctype html>
     }
     .stone.white {
       background: radial-gradient(circle at 34% 28%, #ffffff, #e5e7eb 62%, #b8c0cc);
-      border: 1px solid rgba(21, 32, 51, .14);
+      border: 1px solid rgba(21, 32, 51, 0.14);
     }
     .game-info {
       display: grid;
@@ -537,51 +665,84 @@ HTML = r"""<!doctype html>
       font-size: 13px;
     }
     .game-message, .analysis-box, .search-box {
-      padding: 10px 11px;
+      padding: 10px 12px;
       border: 1px solid var(--line);
-      border-radius: 7px;
-      background: #fff;
+      border-radius: 12px;
+      background: rgba(10, 18, 36, 0.82);
       line-height: 1.55;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
     }
     .analysis-box {
       white-space: pre-wrap;
     }
     form {
       display: flex;
-      gap: 10px;
-      padding: 16px 28px 22px;
-      border-top: 1px solid var(--line);
-      background: rgba(255, 255, 255, .9);
+      align-items: center;
+      gap: 12px;
+      width: min(920px, calc(100% - 40px));
+      margin: 0 auto 18px;
+      padding: 10px 12px 10px 16px;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background:
+        linear-gradient(135deg, rgba(70, 215, 255, 0.08), rgba(139, 92, 255, 0.08)),
+        rgba(9, 16, 34, 0.92);
+      box-shadow: var(--shadow), var(--glow);
+      backdrop-filter: blur(20px);
     }
     input {
       flex: 1;
       min-width: 0;
-      padding: 13px 14px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
+      min-height: 46px;
+      padding: 10px 0;
+      border: 0;
+      border-radius: 0;
       font-size: 15px;
       outline: none;
-      background: #fff;
+      background: transparent;
+      color: var(--text);
+    }
+    input::placeholder {
+      color: #7d93c6;
     }
     input:focus {
-      border-color: #93c5fd;
-      box-shadow: 0 0 0 3px rgba(147, 197, 253, .28);
+      border-color: transparent;
+      box-shadow: none;
     }
     button {
-      width: 96px;
+      width: auto;
+      min-width: 118px;
+      min-height: 46px;
+      padding: 0 18px;
       border: 0;
-      border-radius: 6px;
+      border-radius: 999px;
       color: #fff;
-      background: var(--accent);
+      background: linear-gradient(135deg, #19d7ff, #5d7bff 55%, #8b5cff);
       font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .02em;
       cursor: pointer;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 0 24px rgba(70, 215, 255, 0.24);
+      transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
     }
-    button:hover {
-      background: var(--accent-dark);
+    button:hover:not(.cell) {
+      background: linear-gradient(135deg, #32ddff, #6f8cff 55%, #9b70ff);
+      transform: translateY(-1px);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 0 30px rgba(70, 215, 255, 0.34);
     }
-    button:disabled {
+    button:disabled:not(.cell) {
       opacity: .55;
       cursor: wait;
+    }
+    .cell:hover,
+    .cell:disabled:hover {
+      background: rgba(255, 255, 255, 0.18);
+      transform: none;
+      box-shadow: none;
+      filter: none;
+    }
+    .cell:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.18);
     }
     .loading {
       display: inline-flex;
@@ -608,9 +769,11 @@ HTML = r"""<!doctype html>
       .layout { grid-template-columns: 1fr; }
       aside { display: none; }
       main { height: 100vh; }
-      form { padding: 12px; }
-      header { padding: 14px 16px; }
-      .chat { padding: 16px 12px; }
+      form { width: calc(100% - 24px); margin: 0 auto 14px; padding: 8px 10px 8px 14px; }
+      header { padding: 12px 16px 4px; }
+      header h2 { font-size: 28px; }
+      header p { font-size: 14px; }
+      .chat { padding: 6px 12px 12px; }
       .turn, .thinking-panel { max-width: 100%; }
       .avatar { display: none; }
       .bubble { max-width: 100%; }
@@ -625,53 +788,59 @@ HTML = r"""<!doctype html>
 <body>
   <div class="layout">
     <aside>
-      <h1>Mini ReAct Agent</h1>
-      <div class="subtitle">一个从零实现的 ReAct 工具调用智能体。</div>
-      <div class="status"><span class="dot"></span><span>本地 Web 服务运行中</span></div>
-      <button id="new-chat" class="new-chat" type="button">新建对话</button>
-      <h2>对话</h2>
-      <div id="conversation-list" class="conversation-list"></div>
-      <h2>工具</h2>
-      <div class="tool">calculator</div>
-      <div class="tool">wikipedia_search</div>
-      <div class="tool">file_write</div>
-      <div class="tool">file_read</div>
-      <div class="tool">game_create</div>
-      <div class="tool">game_ai_move</div>
-      <div class="tool">game_analyze</div>
-      <div class="size-picker">
-        <label for="game-size-select">默认棋盘规格</label>
-        <select id="game-size-select">
-          <option value="9">9x9 快速</option>
-          <option value="13" selected>13x13 标准</option>
-          <option value="15">15x15 专业</option>
-          <option value="19">19x19 实验</option>
-        </select>
+      <div class="rail-top">
+        <div class="brand-card">
+          <h1>Mini ReAct Agent</h1>
+          <div class="subtitle">更轻量的多工具智能体界面，聚焦对话、思考过程与棋局交互。</div>
+        </div>
+        <button id="new-chat" class="new-chat" type="button">发起新对话</button>
       </div>
-      <h2>记忆状态</h2>
-      <div class="memory-box">
+      <div class="rail-card">
+        <div class="section-label">会话</div>
+        <div id="conversation-list" class="conversation-list"></div>
+      </div>
+      <div class="rail-card" style="padding: 16px;">
+        <div class="section-label">棋盘规格</div>
+        <div class="size-picker">
+          <label for="game-size-select">默认创建规格</label>
+          <select id="game-size-select">
+            <option value="9">9x9 快速</option>
+            <option value="13" selected>13x13 标准</option>
+            <option value="15">15x15 专业</option>
+            <option value="19">19x19 实验</option>
+          </select>
+        </div>
+      </div>
+      <div class="memory-box" aria-hidden="true">
         <div class="memory-row"><span>消息数</span><strong id="memory-count">-</strong></div>
         <div class="memory-row"><span>上下文字符</span><strong id="memory-chars">-</strong></div>
         <div class="memory-row"><span>摘要字符</span><strong id="memory-summary">-</strong></div>
       </div>
-      <h2>示例</h2>
-      <div class="tool">查一下爱因斯坦的出生年份和去世年份，然后计算他活了多少岁。</div>
+      <div style="display:none;">
+        <div class="tool">calculator</div>
+        <div class="tool">wikipedia_search</div>
+        <div class="tool">file_write</div>
+        <div class="tool">file_read</div>
+        <div class="tool">game_create</div>
+        <div class="tool">game_ai_move</div>
+        <div class="tool">game_analyze</div>
+      </div>
     </aside>
     <main>
       <header>
-        <h2>Agent 对话台</h2>
-        <p>用户提问后，AI 会按步骤思考、选择工具、观察结果并整理答案。</p>
+        <div class="hero">
+          <h2>今天想让 AI 帮你完成什么？</h2>
+          <p>输入任务后，系统会在需要时调用工具，并把关键思考过程与最终结果分开展示，页面重点只保留真正有用的信息。</p>
+        </div>
       </header>
       <section id="chat" class="chat">
         <div class="turn ai-turn">
           <div class="avatar">AI</div>
-          <div class="bubble">
-            <span class="speaker">AI 回答</span>你好，我是 Mini ReAct Agent。输入任务后，我会自动选择工具并展示调用过程。
-          </div>
+          <div class="bubble"><span class="speaker">AI 回答</span><span class="message-text">你好，我是 Mini ReAct Agent。你可以让我查资料、读写文件、做计算，或者直接开始一局五子棋。</span></div>
         </div>
       </section>
       <form id="form">
-        <input id="input" autocomplete="off" placeholder="输入你的任务">
+        <input id="input" autocomplete="off" placeholder="输入任务，例如“总结这个项目结构”或“来一盘 15x15 五子棋”">
         <button id="send" type="submit">发送</button>
       </form>
     </main>
@@ -731,9 +900,7 @@ HTML = r"""<!doctype html>
       return `
         <div class="turn ai-turn">
           <div class="avatar">AI</div>
-          <div class="bubble">
-            <span class="speaker">AI 回答</span>你好，我是 Mini ReAct Agent。输入任务后，我会自动选择工具并展示调用过程。
-          </div>
+          <div class="bubble"><span class="speaker">AI 回答</span><span class="message-text">你好，我是 Mini ReAct Agent。你可以让我查资料、读写文件、做计算，或者直接开始一局五子棋。</span></div>
         </div>
       `;
     }
@@ -793,18 +960,77 @@ HTML = r"""<!doctype html>
     function renderConversationList(conversations, activeId) {
       conversationList.innerHTML = "";
       for (const conversation of conversations) {
+        const row = document.createElement("div");
+        row.className = "conversation-row";
         const button = document.createElement("button");
         button.type = "button";
         button.className = "conversation-item" + (conversation.id === activeId ? " active" : "");
         button.textContent = conversation.title;
-        button.disabled = isBusy;
+        button.disabled = conversationActionsLocked();
         button.addEventListener("click", () => switchConversation(conversation.id, true));
-        conversationList.appendChild(button);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "conversation-delete";
+        remove.textContent = "×";
+        remove.title = "删除会话";
+        remove.setAttribute("aria-label", "删除会话 " + conversation.title);
+        remove.disabled = conversationActionsLocked();
+        remove.addEventListener("click", async (event) => {
+          event.stopPropagation();
+          await deleteConversation(conversation.id);
+        });
+        row.appendChild(button);
+        row.appendChild(remove);
+        conversationList.appendChild(row);
+      }
+    }
+
+    async function deleteConversation(conversationId) {
+      if (conversationActionsLocked()) return;
+      const targetId = String(conversationId || "").trim();
+      if (!targetId) return;
+      const isCurrent = targetId === currentConversationId;
+      const confirmed = window.confirm(isCurrent ? "确认删除当前会话吗？" : "确认删除这条历史会话吗？");
+      if (!confirmed) return;
+      try {
+        if (currentConversationId && targetId !== currentConversationId) {
+          saveCurrentChat();
+        }
+        const response = await fetch("/api/conversations?conversation_id=" + encodeURIComponent(targetId), {method: "DELETE"});
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "删除会话失败");
+        }
+        delete chatViews[targetId];
+        delete activeGameStates[targetId];
+        if (isCurrent) {
+          currentConversationId = data.conversation?.id || null;
+          gameState = null;
+          isGameBusy = false;
+          gameRequestToken += 1;
+          resetGameRefs();
+          if (currentConversationId) {
+            if (chatViews[currentConversationId]) {
+              restoreChat(currentConversationId);
+            } else {
+              await restoreConversationFromServer(currentConversationId);
+            }
+            syncComposerState();
+            await loadMemoryStats(currentConversationId);
+          } else {
+            chat.innerHTML = welcomeHtml();
+            setMemoryStats(null);
+          }
+        }
+        await loadConversations(currentConversationId || data.conversation?.id);
+        if (!input.disabled) input.focus();
+      } catch (error) {
+        window.alert("删除会话失败：" + String(error.message || error));
       }
     }
 
     async function switchConversation(conversationId, shouldSave) {
-      if (isBusy) return;
+      if (conversationActionsLocked()) return;
       if (shouldSave) saveCurrentChat();
       currentConversationId = conversationId;
       if (chatViews[conversationId]) {
@@ -817,7 +1043,7 @@ HTML = r"""<!doctype html>
     }
 
     async function createNewConversation() {
-      if (isBusy) return;
+      if (conversationActionsLocked()) return;
       saveCurrentChat();
       const response = await fetch("/api/conversations", {method: "POST"});
       const data = await response.json();
@@ -1079,11 +1305,19 @@ HTML = r"""<!doctype html>
       return Boolean(gameState && gameState.status === "playing");
     }
 
+    function conversationActionsLocked() {
+      return isBusy || isGamePlaying();
+    }
+
     function syncComposerState() {
       const locked = isGamePlaying();
       if (!isBusy) {
         input.disabled = locked;
         send.disabled = locked;
+      }
+      newChat.disabled = conversationActionsLocked();
+      for (const button of conversationList.querySelectorAll(".conversation-item, .conversation-delete")) {
+        button.disabled = conversationActionsLocked();
       }
       input.placeholder = locked ? "棋局进行中，结束后可继续对话" : "输入你的任务";
     }
@@ -1248,6 +1482,7 @@ HTML = r"""<!doctype html>
       speaker.className = "speaker";
       speaker.textContent = isUser ? "用户提问" : "AI 回答";
       const content = document.createElement("span");
+      content.className = "message-text";
       content.textContent = text;
       bubble.appendChild(speaker);
       bubble.appendChild(content);
@@ -1694,6 +1929,28 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send_json(404, {"error": "Not found"})
 
+    def do_DELETE(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/conversations":
+            self._send_json(404, {"error": "Not found"})
+            return
+        try:
+            params = parse_qs(parsed.query)
+            conversation_id = params.get("conversation_id", [""])[0]
+            conversation = delete_conversation(conversation_id)
+            self._send_json(
+                200,
+                {
+                    "deleted_id": conversation_id,
+                    "conversation": conversation_payload(conversation),
+                    "conversations": list_conversations(),
+                },
+            )
+        except KeyError as exc:
+            self._send_json(404, {"error": str(exc)})
+        except ValueError as exc:
+            self._send_json(400, {"error": str(exc)})
+
     def do_POST(self):
         if self.path == "/api/conversations":
             conversation_id, conversation = create_conversation("新对话")
@@ -1877,7 +2134,11 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print("Mini ReAct Agent Web 已启动：")
-    print("http://localhost:8501")
+    print(f"http://localhost:{PORT}")
+    if HOST == "0.0.0.0":
+        print(f"局域网访问地址：http://<你的本机IP>:{PORT}")
+    else:
+        print(f"当前监听地址：http://{HOST}:{PORT}")
     print("按 Ctrl+C 停止服务。")
     server.serve_forever()
 

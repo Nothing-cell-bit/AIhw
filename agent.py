@@ -431,7 +431,110 @@ class MiniReActAgent:
     @classmethod
     def _clean_final_answer(cls, text: str) -> str:
         text = cls._extract_quoted_final_answer(text) or cls._strip_meta_answer(text)
+        text = cls._sanitize_interactive_gomoku_answer(text)
         return cls._dedupe_repeated_answer(text)
+
+    @staticmethod
+    def _sanitize_interactive_gomoku_answer(text: str) -> str:
+        cleaned = text.replace("\r\n", "\n").strip()
+        if not MiniReActAgent._looks_like_interactive_gomoku_answer(cleaned):
+            return cleaned
+
+        game_id = MiniReActAgent._extract_game_id(cleaned)
+        lines = []
+        for raw_line in cleaned.splitlines():
+            line = raw_line.strip()
+            if not line or MiniReActAgent._is_gomoku_board_line(line):
+                continue
+            line = re.sub(r"棋盘如下[^：:\n]*[：:]?", "", line)
+            line = re.sub(r"[（(]\s*黑子.*?白子.*?[）)]", "", line)
+            line = re.sub(r"\s+", " ", line).strip(" ,，;；")
+            if line:
+                lines.append(line)
+
+        compact_source = "\n".join(lines)
+        segments = re.split(r"(?<=[。！？!?])\s+|\n+", compact_source)
+        kept: List[str] = []
+        for segment in segments:
+            normalized = segment.strip()
+            if not normalized:
+                continue
+            if MiniReActAgent._is_gomoku_noise_segment(normalized):
+                continue
+            if MiniReActAgent._is_gomoku_key_segment(normalized):
+                if normalized not in kept:
+                    kept.append(normalized)
+
+        if game_id and not any("game_id" in item for item in kept):
+            kept.insert(0, f"game_id={game_id}")
+
+        if not kept:
+            return compact_source.strip() or cleaned
+        return "\n".join(kept).strip()
+
+    @staticmethod
+    def _looks_like_interactive_gomoku_answer(text: str) -> bool:
+        markers = (
+            "game_id",
+            "棋盘如下",
+            "玩家执黑",
+            "点击棋盘",
+            "五子棋已开始",
+            "棋局已创建",
+            "请告诉我你第一步",
+            "请告诉我下一步",
+            "AI 落子在",
+            "玩家落子在",
+        )
+        return any(marker in text for marker in markers)
+
+    @staticmethod
+    def _extract_game_id(text: str) -> str:
+        match = re.search(r"game_id\s*[=:：]\s*`?([A-Za-z0-9_-]+)`?", text)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _is_gomoku_board_line(line: str) -> bool:
+        if re.fullmatch(r"\d+(?:\s+\d+){4,}", line):
+            return True
+        if re.fullmatch(r"\d+\s+(?:[.●○OXxo·_]|10\.)?(?:\s*[.●○OXxo·_]){3,}\s*", line):
+            return True
+        if re.fullmatch(r"\d+\s+(?:[.●○OXxo·_]\s*){3,}", line):
+            return True
+        return False
+
+    @staticmethod
+    def _is_gomoku_noise_segment(text: str) -> bool:
+        if not text:
+            return True
+        if text in {"AI 回答", "回复"}:
+            return True
+        if text.startswith("{") or text.startswith("["):
+            return True
+        if text.endswith("}") or text.endswith("]"):
+            return True
+        return False
+
+    @staticmethod
+    def _is_gomoku_key_segment(text: str) -> bool:
+        keywords = (
+            "game_id",
+            "五子棋",
+            "棋局",
+            "玩家执黑",
+            "点击棋盘",
+            "告诉我",
+            "下一步",
+            "落子",
+            "轮到",
+            "平局",
+            "获胜",
+            "AI 胜",
+            "玩家胜",
+            "复盘",
+            "退出",
+        )
+        return any(keyword in text for keyword in keywords)
 
     @staticmethod
     def _extract_quoted_final_answer(text: str) -> str:

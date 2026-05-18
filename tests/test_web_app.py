@@ -11,6 +11,12 @@ from game import AI, HUMAN, STATUS_PLAYING, GAMES, new_game, store_game
 
 
 class WebAppTests(unittest.TestCase):
+    def test_conversation_delete_ui_is_present(self):
+        self.assertIn("conversation-delete", web_app.HTML)
+        self.assertIn('method: "DELETE"', web_app.HTML)
+        self.assertIn("确认删除当前会话吗？", web_app.HTML)
+        self.assertIn("function deleteConversation(conversationId)", web_app.HTML)
+
     def test_game_panel_is_not_in_initial_page_layout(self):
         page_before_script = web_app.HTML.split("<script>", 1)[0]
         self.assertNotIn('id="game-panel"', page_before_script)
@@ -47,6 +53,8 @@ class WebAppTests(unittest.TestCase):
     def test_composer_is_locked_while_game_is_playing(self):
         self.assertIn("function syncComposerState()", web_app.HTML)
         self.assertIn("function isGamePlaying()", web_app.HTML)
+        self.assertIn("function conversationActionsLocked()", web_app.HTML)
+        self.assertIn('conversationList.querySelectorAll(".conversation-item, .conversation-delete")', web_app.HTML)
         self.assertIn("棋局进行中，结束后可继续对话", web_app.HTML)
 
     def test_game_panel_supports_dynamic_board_size_and_ai_profile(self):
@@ -340,6 +348,33 @@ class WebAppTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             web_app.get_agent = original_agent_factory
+
+    def test_delete_conversation_api_removes_target_and_returns_fallback(self):
+        original_conversations = web_app.CONVERSATIONS
+        first_id, first = web_app.create_conversation("会话一")
+        second_id, second = web_app.create_conversation("会话二")
+        first["updated_at"] = time.time()
+        second["updated_at"] = time.time() + 1
+        web_app.CONVERSATIONS = {first_id: first, second_id: second}
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web_app.Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            req = request.Request(
+                f"http://127.0.0.1:{server.server_address[1]}/api/conversations?conversation_id={second_id}",
+                method="DELETE",
+            )
+            with request.urlopen(req, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+            self.assertEqual(payload["deleted_id"], second_id)
+            self.assertEqual(payload["conversation"]["id"], first_id)
+            self.assertEqual(len(payload["conversations"]), 1)
+            self.assertNotIn(second_id, web_app.CONVERSATIONS)
+        finally:
+            server.shutdown()
+            server.server_close()
+            web_app.CONVERSATIONS = original_conversations
 
 
 if __name__ == "__main__":
