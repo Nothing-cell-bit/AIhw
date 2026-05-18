@@ -166,6 +166,23 @@ class MultiAgentTest(unittest.TestCase):
 
 
 class LegacyStreamingTest(unittest.TestCase):
+    def test_legacy_agent_compacts_game_observation_for_answer_context(self):
+        observation = json.dumps(
+            {
+                "game_id": "game-1",
+                "size": 15,
+                "board_label": "15x15",
+                "status": "playing",
+                "message": "15x15 五子棋已开始，玩家执黑先手。",
+                "board": [[0] * 15 for _ in range(15)],
+            },
+            ensure_ascii=False,
+        )
+        compact = MiniReActAgent._compact_game_observation("game_create", observation)
+        self.assertIn('"game_id": "game-1"', compact)
+        self.assertIn('"board_label": "15x15"', compact)
+        self.assertNotIn('"board"', compact)
+
     def test_legacy_agent_emits_reasoning_delta_when_stream_supported(self):
         class ReasoningLegacyLLM:
             def chat(self, messages, stream=False):

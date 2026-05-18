@@ -378,7 +378,7 @@ class AgentCoordinator:
                 "content": (
                     f"用户任务：{user_input}\n\n"
                     f"计划：{json.dumps(plan.to_dict(), ensure_ascii=False)}\n\n"
-                    f"执行步骤：{json.dumps([_step_to_dict(step) for step in steps], ensure_ascii=False)}"
+                    f"执行步骤：{json.dumps([_answer_step_dict(step) for step in steps], ensure_ascii=False)}"
                 ),
             },
         ]
@@ -421,6 +421,8 @@ def _fallback_final_answer(steps: List[AgentStep]) -> str:
         if step.final_answer:
             return step.final_answer
         if step.observation:
+            if step.action and step.action.startswith("game_"):
+                return f"已完成工具调用，结果如下：\n{_compact_game_observation(step.action, step.observation)}"
             return f"已完成工具调用，结果如下：\n{step.observation}"
     return "任务已处理，但没有生成可展示的最终内容。"
 
@@ -433,6 +435,39 @@ def _chunk_text(text: str) -> Iterator[str]:
 def _clean_final_answer(text: str) -> str:
     cleaned = _extract_quoted_final_answer(text) or _strip_meta_answer(text)
     return _dedupe_repeated_answer(cleaned)
+
+
+def _answer_step_dict(step: AgentStep) -> Dict[str, Any]:
+    payload = _step_to_dict(step)
+    if step.action and step.action.startswith("game_") and step.observation:
+        payload["observation"] = _compact_game_observation(step.action, step.observation)
+    return payload
+
+
+def _compact_game_observation(action: str, observation: str) -> str:
+    try:
+        payload = json.loads(observation)
+    except (TypeError, json.JSONDecodeError):
+        return observation
+
+    if not isinstance(payload, dict):
+        return observation
+
+    compact: Dict[str, Any] = {
+        "game_id": payload.get("game_id"),
+        "board_label": payload.get("board_label") or (
+            f"{payload.get('size')}x{payload.get('size')}" if payload.get("size") else None
+        ),
+        "status": payload.get("status"),
+        "result": payload.get("result"),
+        "message": payload.get("message"),
+    }
+    move = payload.get("move")
+    if isinstance(move, dict) and move.get("coord"):
+        compact["move"] = move.get("coord")
+    if action == "game_moves" and payload.get("sequence_text"):
+        compact["sequence_text"] = payload.get("sequence_text")
+    return json.dumps({key: value for key, value in compact.items() if value not in (None, "", [])}, ensure_ascii=False)
 
 
 def _extract_quoted_final_answer(text: str) -> str:

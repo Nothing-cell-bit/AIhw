@@ -703,6 +703,7 @@ HTML = r"""<!doctype html>
     let gameRequestToken = 0;
     const chatViews = {};
     const activeGameStates = {};
+    let pendingGameState = null;
 
     function setMemoryStats(stats) {
       if (!stats) {
@@ -967,12 +968,19 @@ HTML = r"""<!doctype html>
       }
     }
 
-    function maybeShowGameFromToolStep(step) {
+    function maybeShowGameFromToolStep(step, options = {}) {
       if (!step || !step.action || !step.observation) return;
       if (!["game_create", "game_player_move", "game_ai_move", "game_resign"].includes(step.action)) return;
       try {
         const data = JSON.parse(step.observation);
         if (data.board && data.game_id) {
+          if (step.action === "game_create" && options.deferCreate) {
+            if (gameState?.game_id && data.game_id !== gameState.game_id) {
+              freezeCurrentGamePanel();
+            }
+            pendingGameState = data;
+            return;
+          }
           if (step.action === "game_create" && gameState?.game_id && data.game_id !== gameState.game_id) {
             freezeCurrentGamePanel();
           }
@@ -1362,13 +1370,35 @@ HTML = r"""<!doctype html>
       return "";
     }
 
+    function compactGameObservation(step, payload) {
+      const label = payload.board_label || (payload.size ? `${payload.size}x${payload.size}` : "棋局");
+      const base = [`game_id=${payload.game_id || "unknown"}`, label];
+      if (payload.move?.coord) base.push(`落子=${payload.move.coord}`);
+      if (payload.status) base.push(`状态=${payload.status}`);
+      if (payload.message) base.push(`提示=${payload.message}`);
+      return base.join("，");
+    }
+
     function formatObservation(step) {
       if (!step.observation) return "";
       const text = String(step.observation);
+      if ((step.action || "").startsWith("game_")) {
+        try {
+          const payload = JSON.parse(text);
+          if (payload && typeof payload === "object") {
+            return compactGameObservation(step, payload);
+          }
+        } catch (error) {
+          // Fall back to plain text.
+        }
+      }
       return text.length > 600 ? text.slice(0, 600) + "..." : text;
     }
 
-    function renderStep(container, step) {
+    function renderStep(container, step, options = {}) {
+      if (step.final_answer) {
+        return;
+      }
       const item = document.createElement("div");
       item.className = "step";
       const index = document.createElement("div");
@@ -1377,7 +1407,7 @@ HTML = r"""<!doctype html>
       const body = document.createElement("div");
       const title = document.createElement("div");
       title.className = "step-title";
-      title.textContent = step.final_answer ? "形成最终回答" : (step.action ? "调用工具" : "继续调整");
+      title.textContent = step.action ? "调用工具" : "继续调整";
       const thought = document.createElement("div");
       thought.className = "step-text";
       thought.textContent = step.summary || ("思考：" + (step.thought || "无"));
@@ -1396,18 +1426,11 @@ HTML = r"""<!doctype html>
         ].filter(Boolean).join("\n");
         body.appendChild(tool);
       }
-      if (step.final_answer) {
-        const finalText = document.createElement("div");
-        finalText.className = "tool-call";
-        finalText.textContent = "答案：" + step.final_answer;
-        body.appendChild(finalText);
-      }
-
       item.appendChild(index);
       item.appendChild(body);
       container.appendChild(item);
       chat.scrollTop = chat.scrollHeight;
-      maybeShowGameFromToolStep(step);
+      maybeShowGameFromToolStep(step, options);
     }
 
     function renderPlan(container, plan) {
@@ -1551,6 +1574,7 @@ HTML = r"""<!doctype html>
         let finalAnswer = "";
         let gotStep = false;
         let streamDone = false;
+        pendingGameState = null;
 
         while (!streamDone) {
           const chunk = await reader.read();
@@ -1585,7 +1609,7 @@ HTML = r"""<!doctype html>
               stopStatus();
               panel.state.textContent = event.message || "工具已返回结果";
               if (event.step) {
-                renderStep(panel.steps, event.step);
+                renderStep(panel.steps, event.step, {deferCreate: true});
               }
             } else if (event.type === "answer_delta") {
               stopStatus();
@@ -1597,11 +1621,15 @@ HTML = r"""<!doctype html>
               gotStep = true;
               stopStatus();
               panel.state.textContent = "正在展示真实步骤";
-              renderStep(panel.steps, event.step);
+              renderStep(panel.steps, event.step, {deferCreate: true});
             } else if (event.type === "done") {
               stopStatus();
               finalAnswer = event.final_answer || finalAnswer || "";
               panel.state.textContent = gotStep ? "完成" : "没有工具调用步骤";
+              if (pendingGameState) {
+                applyGameState(pendingGameState);
+                pendingGameState = null;
+              }
               if (event.memory) {
                 setMemoryStats(event.memory);
               }
@@ -1620,6 +1648,7 @@ HTML = r"""<!doctype html>
         waiting.textContent = finalAnswer || "没有返回内容。";
       } catch (error) {
         stopStatus();
+        pendingGameState = null;
         waiting.textContent = "请求失败：" + error;
         panel.state.textContent = "请求失败";
       } finally {

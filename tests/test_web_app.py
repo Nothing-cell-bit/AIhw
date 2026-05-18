@@ -60,6 +60,10 @@ class WebAppTests(unittest.TestCase):
         self.assertIn("function renderReasoningDelta(panel, event)", web_app.HTML)
         self.assertIn("function finalizeReasoning(panel, event)", web_app.HTML)
         self.assertIn('} else if (event.type === "reasoning_delta") {', web_app.HTML)
+        self.assertIn("let pendingGameState = null;", web_app.HTML)
+        self.assertIn("if (step.action === \"game_create\" && options.deferCreate)", web_app.HTML)
+        self.assertNotIn("function preparePendingGamePanel(data)", web_app.HTML)
+        self.assertNotIn("形成最终回答", web_app.HTML)
 
     def test_game_ai_move_api_returns_draw_for_full_board(self):
         GAMES.clear()

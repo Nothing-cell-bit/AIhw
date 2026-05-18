@@ -228,7 +228,7 @@ class MiniReActAgent:
                 "content": (
                     f"用户任务：{user_input}\n\n"
                     f"Agent 草稿答案：{draft_answer}\n\n"
-                    f"执行步骤：{json.dumps([self._step_to_dict(step) for step in steps], ensure_ascii=False)}"
+                    f"执行步骤：{json.dumps([self._answer_step_dict(step) for step in steps], ensure_ascii=False)}"
                 ),
             },
         ]
@@ -278,7 +278,7 @@ class MiniReActAgent:
             return MiniReActAgent._format_wikipedia_fallback(observation)
 
         if action.startswith("game_"):
-            return f"棋局工具已返回结果：\n{observation}"
+            return f"棋局工具已返回结果：\n{MiniReActAgent._compact_game_observation(action, observation)}"
 
         return f"我已经拿到工具结果，但模型接口在总结时返回空内容。工具结果如下：\n{observation}"
 
@@ -293,6 +293,32 @@ class MiniReActAgent:
         return f"根据查询结果：{observation}"
 
     @staticmethod
+    def _compact_game_observation(action: str, observation: str) -> str:
+        try:
+            payload = json.loads(observation)
+        except (TypeError, json.JSONDecodeError):
+            return observation
+
+        if not isinstance(payload, dict):
+            return observation
+
+        compact: Dict[str, Any] = {
+            "game_id": payload.get("game_id"),
+            "board_label": payload.get("board_label") or (
+                f"{payload.get('size')}x{payload.get('size')}" if payload.get("size") else None
+            ),
+            "status": payload.get("status"),
+            "result": payload.get("result"),
+            "message": payload.get("message"),
+        }
+        move = payload.get("move")
+        if isinstance(move, dict) and move.get("coord"):
+            compact["move"] = move.get("coord")
+        if action == "game_moves" and payload.get("sequence_text"):
+            compact["sequence_text"] = payload.get("sequence_text")
+        return json.dumps({key: value for key, value in compact.items() if value not in (None, "", [])}, ensure_ascii=False)
+
+    @staticmethod
     def _step_to_dict(step: AgentStep) -> Dict[str, Any]:
         return {
             "index": step.index,
@@ -303,6 +329,13 @@ class MiniReActAgent:
             "final_answer": step.final_answer,
             "summary": MiniReActAgent._natural_step_summary(step),
         }
+
+    @staticmethod
+    def _answer_step_dict(step: AgentStep) -> Dict[str, Any]:
+        payload = MiniReActAgent._step_to_dict(step)
+        if step.action and step.action.startswith("game_") and step.observation:
+            payload["observation"] = MiniReActAgent._compact_game_observation(step.action, step.observation)
+        return payload
 
     @staticmethod
     def _natural_step_summary(step: AgentStep) -> str:
