@@ -74,6 +74,7 @@ SYSTEM_PROMPT = """
 - 不要编造实时信息；需要外部知识时优先使用 wikipedia_search。
 - 数学计算必须使用 calculator 工具。
 - 用户提到“五子棋”不一定是要开局；像“什么是五子棋”“五子棋规则/历史/玩法”属于知识问答，应优先直接回答或使用 wikipedia_search，而不是调用 game_create。
+- 如果用户明确指定了棋盘规格，例如 `9x9`、`13x13`、`15x15`、`19x19`，调用 `game_create` 时必须把对应数值写入 `action_input.size`，不要擅自回退成默认 `13`。
 - 用户要求“本局序列 / 棋谱 / 手顺 / 落子顺序 / 每一步落子”时，应优先调用 game_moves；如果消息里给出了当前棋局上下文，应优先使用上下文中的 game_id。
 - 棋局工具返回 status=finished、draw 或 resigned 时，要说明胜负结果，并建议查看或调用 game_analyze。
 """.strip()
@@ -103,6 +104,7 @@ PLANNER_PROMPT = """
 - 需要精确计算时必须使用 calculator。
 - 需要外部百科知识时优先使用 wikipedia_search。
 - 只有用户明确要开始或继续下棋时才规划 game_create / game_player_move / game_ai_move；如果是在问五子棋的定义、规则、历史或玩法，不要把它规划成棋局工具调用。
+- 如果用户明确指定棋盘规格，例如 `9x9`、`13x13`、`15x15`、`19x19`，规划 `game_create` 时必须把对应数值写进 `tool_input.size`。
 - 如果用户想查看本局棋谱、落子序列或手顺，应规划 game_moves；如果上下文里带了当前棋局 ID，优先沿用该 game_id。
 - 不要执行工具，不要编造工具结果。
 - 如果长期记忆与用户最新消息冲突，优先相信用户最新消息。
@@ -137,6 +139,7 @@ EXECUTOR_PROMPT = """
 - 不要自己编造工具结果。
 - action_input 必须是 JSON 对象。
 - 每次只处理当前步骤。
+- 如果当前步骤是创建棋局，且用户或计划里已经明确指定了棋盘规格，必须保留该 `size` 参数，不要改回默认值。
 """.strip()
 
 

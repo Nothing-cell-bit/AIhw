@@ -23,13 +23,13 @@ class Settings:
     api_key: str
     base_url: str
     model: str
-    max_steps: int = 6
+    max_steps: int = 12
     memory_max_messages: int = 16
     memory_max_chars: int = 12000
     multi_agent_enabled: bool = False
-    planner_max_steps: int = 8
-    executor_max_steps: int = 8
-    replan_max_attempts: int = 1
+    planner_max_steps: int = 12
+    executor_max_steps: int = 12
+    replan_max_attempts: int = 2
     final_answer_streaming: bool = True
     long_term_memory_enabled: bool = False
     long_term_memory_path: str = "data/memory.sqlite3"
@@ -42,7 +42,7 @@ def get_settings() -> Settings:
     api_key = os.getenv("MODELSCOPE_API_KEY", "").strip()
     base_url = os.getenv("MODELSCOPE_BASE_URL", "https://api-inference.modelscope.cn/v1/").strip()
     model = os.getenv("MODELSCOPE_MODEL", "deepseek-ai/DeepSeek-V4-Flash").strip()
-    max_steps = int(os.getenv("AGENT_MAX_STEPS", "6"))
+    max_steps = int(os.getenv("AGENT_MAX_STEPS", "12"))
     memory_max_messages = int(os.getenv("MEMORY_MAX_MESSAGES", "16"))
     memory_max_chars = int(os.getenv("MEMORY_MAX_CHARS", "12000"))
 
@@ -54,9 +54,9 @@ def get_settings() -> Settings:
         memory_max_messages=memory_max_messages,
         memory_max_chars=memory_max_chars,
         multi_agent_enabled=_env_bool("MULTI_AGENT_ENABLED", False),
-        planner_max_steps=int(os.getenv("PLANNER_MAX_STEPS", "8")),
-        executor_max_steps=int(os.getenv("EXECUTOR_MAX_STEPS", "8")),
-        replan_max_attempts=int(os.getenv("REPLAN_MAX_ATTEMPTS", "1")),
+        planner_max_steps=int(os.getenv("PLANNER_MAX_STEPS", "12")),
+        executor_max_steps=int(os.getenv("EXECUTOR_MAX_STEPS", "12")),
+        replan_max_attempts=int(os.getenv("REPLAN_MAX_ATTEMPTS", "2")),
         final_answer_streaming=_env_bool("FINAL_ANSWER_STREAMING", True),
         long_term_memory_enabled=_env_bool("LONG_TERM_MEMORY_ENABLED", False),
         long_term_memory_path=os.getenv("LONG_TERM_MEMORY_PATH", "data/memory.sqlite3").strip(),

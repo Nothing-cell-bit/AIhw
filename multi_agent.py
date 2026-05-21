@@ -1,11 +1,27 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional
 
+from agent_shared import (
+    answer_step_dict,
+    chunk_text,
+    clean_final_answer,
+    compact_game_observation,
+    dedupe_repeated_answer,
+    extract_game_id,
+    extract_quoted_final_answer,
+    is_gomoku_board_line,
+    is_gomoku_key_segment,
+    is_gomoku_noise_segment,
+    looks_like_interactive_gomoku_answer,
+    parse_json,
+    sanitize_interactive_gomoku_answer,
+    step_to_dict,
+    strip_meta_answer,
+)
 from agent_types import AgentResult, AgentStep
 from config import get_settings
 from events import make_event
@@ -428,174 +444,51 @@ def _fallback_final_answer(steps: List[AgentStep]) -> str:
 
 
 def _chunk_text(text: str) -> Iterator[str]:
-    for match in re.finditer(r"[A-Za-z0-9]+(?:'[A-Za-z0-9]+)?|[\u4e00-\u9fff]|[^\S\r\n]+|[^\w\s]", text):
-        yield match.group(0)
+    yield from chunk_text(text)
 
 
 def _clean_final_answer(text: str) -> str:
-    cleaned = _extract_quoted_final_answer(text) or _strip_meta_answer(text)
-    cleaned = _sanitize_interactive_gomoku_answer(cleaned)
-    return _dedupe_repeated_answer(cleaned)
+    return clean_final_answer(text)
 
 
 def _answer_step_dict(step: AgentStep) -> Dict[str, Any]:
-    payload = _step_to_dict(step)
-    if step.action and step.action.startswith("game_") and step.observation:
-        payload["observation"] = _compact_game_observation(step.action, step.observation)
-    return payload
+    return answer_step_dict(step, _natural_step_summary)
 
 
 def _compact_game_observation(action: str, observation: str) -> str:
-    try:
-        payload = json.loads(observation)
-    except (TypeError, json.JSONDecodeError):
-        return observation
-
-    if not isinstance(payload, dict):
-        return observation
-
-    compact: Dict[str, Any] = {
-        "game_id": payload.get("game_id"),
-        "board_label": payload.get("board_label") or (
-            f"{payload.get('size')}x{payload.get('size')}" if payload.get("size") else None
-        ),
-        "status": payload.get("status"),
-        "result": payload.get("result"),
-        "message": payload.get("message"),
-    }
-    move = payload.get("move")
-    if isinstance(move, dict) and move.get("coord"):
-        compact["move"] = move.get("coord")
-    if action == "game_moves" and payload.get("sequence_text"):
-        compact["sequence_text"] = payload.get("sequence_text")
-    return json.dumps({key: value for key, value in compact.items() if value not in (None, "", [])}, ensure_ascii=False)
+    return compact_game_observation(action, observation)
 
 
 def _sanitize_interactive_gomoku_answer(text: str) -> str:
-    cleaned = text.replace("\r\n", "\n").strip()
-    if not _looks_like_interactive_gomoku_answer(cleaned):
-        return cleaned
-
-    game_id = _extract_game_id(cleaned)
-    lines: List[str] = []
-    for raw_line in cleaned.splitlines():
-        line = raw_line.strip()
-        if not line or _is_gomoku_board_line(line):
-            continue
-        line = re.sub(r"棋盘如下[^：:\n]*[：:]?", "", line)
-        line = re.sub(r"[（(]\s*黑子.*?白子.*?[）)]", "", line)
-        line = re.sub(r"\s+", " ", line).strip(" ,，;；")
-        if line:
-            lines.append(line)
-
-    compact_source = "\n".join(lines)
-    segments = re.split(r"(?<=[。！？!?])\s+|\n+", compact_source)
-    kept: List[str] = []
-    for segment in segments:
-        normalized = segment.strip()
-        if not normalized:
-            continue
-        if _is_gomoku_noise_segment(normalized):
-            continue
-        if _is_gomoku_key_segment(normalized):
-            if normalized not in kept:
-                kept.append(normalized)
-
-    if game_id and not any("game_id" in item for item in kept):
-        kept.insert(0, f"game_id={game_id}")
-
-    if not kept:
-        return compact_source.strip() or cleaned
-    return "\n".join(kept).strip()
+    return sanitize_interactive_gomoku_answer(text)
 
 
 def _looks_like_interactive_gomoku_answer(text: str) -> bool:
-    markers = (
-        "game_id",
-        "棋盘如下",
-        "玩家执黑",
-        "点击棋盘",
-        "五子棋已开始",
-        "棋局已创建",
-        "请告诉我你第一步",
-        "请告诉我下一步",
-        "AI 落子在",
-        "玩家落子在",
-    )
-    return any(marker in text for marker in markers)
+    return looks_like_interactive_gomoku_answer(text)
 
 
 def _extract_game_id(text: str) -> str:
-    match = re.search(r"game_id\s*[=:：]\s*`?([A-Za-z0-9_-]+)`?", text)
-    return match.group(1) if match else ""
+    return extract_game_id(text)
 
 
 def _is_gomoku_board_line(line: str) -> bool:
-    if re.fullmatch(r"\d+(?:\s+\d+){4,}", line):
-        return True
-    if re.fullmatch(r"\d+\s+(?:[.●○OXxo·_]|10\.)?(?:\s*[.●○OXxo·_]){3,}\s*", line):
-        return True
-    if re.fullmatch(r"\d+\s+(?:[.●○OXxo·_]\s*){3,}", line):
-        return True
-    return False
+    return is_gomoku_board_line(line)
 
 
 def _is_gomoku_noise_segment(text: str) -> bool:
-    if not text:
-        return True
-    if text in {"AI 回答", "回复"}:
-        return True
-    if text.startswith("{") or text.startswith("["):
-        return True
-    if text.endswith("}") or text.endswith("]"):
-        return True
-    return False
+    return is_gomoku_noise_segment(text)
 
 
 def _is_gomoku_key_segment(text: str) -> bool:
-    keywords = (
-        "game_id",
-        "五子棋",
-        "棋局",
-        "玩家执黑",
-        "点击棋盘",
-        "告诉我",
-        "下一步",
-        "落子",
-        "轮到",
-        "平局",
-        "获胜",
-        "AI 胜",
-        "玩家胜",
-        "复盘",
-        "退出",
-    )
-    return any(keyword in text for keyword in keywords)
+    return is_gomoku_key_segment(text)
 
 
 def _extract_quoted_final_answer(text: str) -> str:
-    patterns = [
-        r"最终答案(?:就是|是|为)?[：:\s]*[\"“](.+?)[\"”]",
-        r"预期的回答[：:\s]*[\"“](.+?)[\"”]",
-        r"Agent\s*草稿答案(?:已经)?给出(?:了)?[：:\s]*[\"“](.+?)[\"”]",
-        r"草稿答案(?:已经)?给出(?:了)?[：:\s]*[\"“](.+?)[\"”]",
-        r"Agent\s*草稿答案[：:\s]*[\"“](.+?)[\"”]",
-    ]
-    for pattern in patterns:
-        matches = re.findall(pattern, text, flags=re.S)
-        if matches:
-            return matches[-1].strip()
-    return ""
+    return extract_quoted_final_answer(text)
 
 
 def _strip_meta_answer(text: str) -> str:
-    markers = ["所以回复用户即可。", "所以回复用户即可：", "所以回答：", "回答：", "最终答案：", "预期的回答："]
-    cleaned = text.strip()
-    for marker in markers:
-        index = cleaned.rfind(marker)
-        if index != -1:
-            return cleaned[index + len(marker) :].strip()
-    return cleaned
+    return strip_meta_answer(text)
 
 
 def _stream_json_events(
@@ -648,58 +541,15 @@ def _stream_json_events(
 
 
 def _dedupe_repeated_answer(text: str) -> str:
-    cleaned = text.strip()
-    if not cleaned:
-        return ""
-
-    normalized = cleaned.replace(" ", "")
-    if len(normalized) % 2 == 0:
-        half = len(normalized) // 2
-        if normalized[:half] == normalized[half:]:
-            return cleaned[: len(cleaned) // 2].strip()
-
-    sentences = re.findall(r"[^。！？!?]+[。！？!?]?", cleaned)
-    if len(sentences) >= 2 and len(sentences) % 2 == 0:
-        half = len(sentences) // 2
-        left = "".join(sentences[:half]).strip()
-        right = "".join(sentences[half:]).strip()
-        if left and left == right:
-            return left
-
-    return cleaned
+    return dedupe_repeated_answer(text)
 
 
 def _parse_json(text: str) -> Optional[Dict[str, Any]]:
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.startswith("json"):
-            text = text[4:].strip()
-    try:
-        value = json.loads(text)
-        return value if isinstance(value, dict) else None
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            return None
-        try:
-            value = json.loads(text[start : end + 1])
-            return value if isinstance(value, dict) else None
-        except json.JSONDecodeError:
-            return None
+    return parse_json(text)
 
 
 def _step_to_dict(step: AgentStep) -> Dict[str, Any]:
-    return {
-        "index": step.index,
-        "thought": step.thought,
-        "action": step.action,
-        "action_input": step.action_input,
-        "observation": step.observation,
-        "final_answer": step.final_answer,
-        "summary": _natural_step_summary(step),
-    }
+    return step_to_dict(step, _natural_step_summary)
 
 
 def _dict_to_step(payload: Dict[str, Any]) -> AgentStep:

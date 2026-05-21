@@ -29,11 +29,14 @@ from game_ai import choose_ai_move, evaluate_board, get_search_profile
 def game_create(
     game: str = "gomoku",
     size: int = DEFAULT_BOARD_SIZE,
+    board_size: Optional[int] = None,
     human: Union[str, int] = "B",
     ai: Union[str, int] = "W",
 ) -> str:
     if game != "gomoku":
         raise GameError("首版只支持 gomoku 五子棋。")
+    if board_size is not None:
+        size = int(board_size)
     human_player = _piece_to_int(human, HUMAN)
     ai_player = _piece_to_int(ai, AI)
     state = store_game(new_game(size=size, human=human_player, ai=ai_player))
@@ -206,6 +209,26 @@ def game_resign(game_id: Optional[str] = None) -> str:
     payload["board_label"] = board_size_label(state.size)
     payload["ai_profile"] = _profile_payload(state.size)
     payload["message"] = "玩家已提前退出，本局记为 AI 胜。"
+    return _json(payload)
+
+
+def game_state(game_id: Optional[str] = None) -> str:
+    state = get_game(game_id)
+    payload = serialize_state(state)
+    payload["board_label"] = board_size_label(state.size)
+    payload["ai_profile"] = _profile_payload(state.size)
+    if state.status == STATUS_PLAYING:
+        if state.moves:
+            current = "玩家" if state.turn == state.human else "AI"
+            payload["message"] = f"棋局进行中，当前轮到{current}。"
+        else:
+            payload["message"] = f"{board_size_label(state.size)} 五子棋已开始，玩家执黑先手。"
+    elif state.status == STATUS_DRAW:
+        payload["message"] = "棋盘已满，本局平局。"
+    elif state.status == STATUS_RESIGNED:
+        payload["message"] = "玩家已提前退出，本局记为 AI 胜。"
+    else:
+        payload["message"] = f"本局已结束，结果：{result_label(state)}。"
     return _json(payload)
 
 

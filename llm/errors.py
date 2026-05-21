@@ -1,0 +1,2 @@
+class LLMEmptyResponseError(RuntimeError):
+    pass

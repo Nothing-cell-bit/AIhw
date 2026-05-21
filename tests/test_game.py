@@ -138,6 +138,12 @@ class GomokuGameTests(unittest.TestCase):
         self.assertEqual(len(created["board"][0]), 19)
         self.assertEqual(created["ai_profile"]["time_limit_ms"], get_search_profile(19).time_limit_ms)
 
+    def test_game_create_accepts_board_size_alias(self):
+        created = json.loads(game_create(board_size=15))
+        self.assertEqual(created["size"], 15)
+        self.assertEqual(created["board_label"], "15x15")
+        self.assertEqual(len(created["board"]), 15)
+
     def test_coord_label_supports_double_letters(self):
         self.assertEqual(coord_label(0, 18), "S1")
         self.assertEqual(coord_label(0, 26), "AA1")

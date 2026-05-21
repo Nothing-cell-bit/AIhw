@@ -8,7 +8,8 @@ from llm_client import LLMClient
 from agent import MiniReActAgent
 from memory import ConversationMemory
 from memory_store import MemoryExtractor, MemoryStore
-from multi_agent import AgentCoordinator
+from multi_agent import AgentCoordinator, _clean_final_answer as clean_multi_final_answer
+from prompts import EXECUTOR_PROMPT, PLANNER_PROMPT, SYSTEM_PROMPT
 
 
 class FakeLLM:
@@ -164,6 +165,24 @@ class MultiAgentTest(unittest.TestCase):
         self.assertIn("reasoning_delta", event_types)
         self.assertIn("reasoning_done", event_types)
 
+    def test_prompts_require_preserving_explicit_game_board_size(self):
+        self.assertIn("15x15", SYSTEM_PROMPT)
+        self.assertIn("action_input.size", SYSTEM_PROMPT)
+        self.assertIn("tool_input.size", PLANNER_PROMPT)
+        self.assertIn("size", EXECUTOR_PROMPT)
+
+    def test_multi_agent_final_answer_unwraps_answer_json_shell(self):
+        raw = json.dumps(
+            {
+                "answer": "《我的世界》是微软旗下 Mojang Studios 开发的沙盒游戏。"
+            },
+            ensure_ascii=False,
+        )
+        self.assertEqual(
+            clean_multi_final_answer(raw),
+            "《我的世界》是微软旗下 Mojang Studios 开发的沙盒游戏。",
+        )
+
 
 class LegacyStreamingTest(unittest.TestCase):
     def test_legacy_agent_compacts_game_observation_for_answer_context(self):
@@ -182,6 +201,26 @@ class LegacyStreamingTest(unittest.TestCase):
         self.assertIn('"game_id": "game-1"', compact)
         self.assertIn('"board_label": "15x15"', compact)
         self.assertNotIn('"board"', compact)
+
+    def test_multi_agent_reuses_shared_gomoku_answer_cleaning(self):
+        raw = """
+        AI 回答
+        game_id=gomoku-42
+        1 2 3 4 5 6 7 8 9
+        1 . . . . . . . . .
+        棋盘如下：
+        9x9 五子棋已开始，玩家执黑先手。
+        请告诉我下一步。
+        """.strip()
+        cleaned = clean_multi_final_answer(raw)
+        self.assertIn("game_id=gomoku-42", cleaned)
+        self.assertIn("五子棋已开始", cleaned)
+        self.assertIn("请告诉我下一步", cleaned)
+        self.assertNotIn("1 . . .", cleaned)
+
+    def test_legacy_agent_unwraps_answer_json_shell(self):
+        raw = json.dumps({"answer": "你好！有什么我可以帮你的吗？"}, ensure_ascii=False)
+        self.assertEqual(MiniReActAgent._clean_final_answer(raw), "你好！有什么我可以帮你的吗？")
 
     def test_legacy_agent_emits_reasoning_delta_when_stream_supported(self):
         class ReasoningLegacyLLM:
